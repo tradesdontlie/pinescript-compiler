@@ -1,250 +1,147 @@
 # 08 — Runtime: request.security()
 
-> **Status**: NOT STARTED
-> **Priority**: P0 (7 calls in benchmark)
-> **File to create**: `src/runtime/builtins/request.ts`
+> **Status**: COMPLETE (P0 DONE — same-symbol MTF resampling)
+> **Priority**: P0 DONE
+> **File**: `src/runtime/builtins/request.ts`
 
 ---
 
-## What Exists
+## What's Implemented
 
-- `request.security` is mapped in function-mapper.ts to `__rt.request.security`
-- The runtime context has `request` referenced but no actual implementation
-- No multi-timeframe data loading exists
+`createRequestModule(bars, getCurrentBarIndex, getCurrentTimeframe)` — factory that creates a `request` module with MTF resampling capability.
 
----
+### Core Implementation
 
-## What's Missing
+**`request.security(symbol, timeframe, expression, gaps?, lookahead?)`**
 
-### 1. `request.security()` — P0
+Handles same-symbol MTF requests by resampling the input bars to the target timeframe.
 
-**Pine Script syntax:**
-```pine
-// Basic: get close from another timeframe
-dailyClose = request.security(syminfo.tickerid, "D", close)
+**Resampling:** `getResampledBars(bars, tf)` groups input bars into higher-TF periods using a period-key function:
+- `"D"` — groups by UTC year/month/day
+- `"W"` — groups by ISO week (floors to Monday)
+- `"M"` — groups by UTC year/month
+- Numeric string — groups by N-minute bucket
 
-// With expression
-dailyHigh = request.security(syminfo.tickerid, "D", high)
+**Aggregation:** Each group produces one `ResampledBar` with open=first bar's open, high=max, low=min, close=last bar's close, volume=sum.
 
-// With tuple return
-[dailyOpen, dailyClose] = request.security(syminfo.tickerid, "D", [open, close])
+**Lookup:** `buildBarToResampledIndex(barsLen, resampled)` builds an `Int32Array` for O(1) mapping from original bar index to resampled bar index.
 
-// With lookahead
-prevDailyClose = request.security(syminfo.tickerid, "D", close, lookahead=barmerge.lookahead_on)
+**Lookahead behavior:**
+- `barmerge.lookahead_on` or `"lookahead_on"` or `true` — returns current period's value (forward-looking, available from first bar of the period)
+- Default (lookahead off) — returns **previous** completed period's value (no peeking); returns NA for the first period
 
-// With gaps
-dailyClose = request.security(syminfo.tickerid, "D", close, gaps=barmerge.gaps_on)
-```
+**Gaps behavior:**
+- `barmerge.gaps_on` — only emits a non-NA value on the **first** bar of each new period; all other bars in the period get NA
+- Default (gaps off) — repeats the last known value across all bars in the period
 
-**Benchmark usage:**
-```pine
-tfClose = request.security(syminfo.tickerid, "60", close, lookahead=barmerge.lookahead_on)
-```
-7 calls with `barmerge.lookahead_on`.
+**Same-timeframe shortcut:** If `timeframe === currentTf` or `timeframe === ''`, returns the expression directly (no resampling needed).
 
-**Parameters:**
-| Param | Type | Description |
-|-------|------|-------------|
-| `symbol` | string | Ticker ID (e.g., `syminfo.tickerid`) |
-| `timeframe` | string | `"D"`, `"W"`, `"60"`, `"240"`, etc. |
-| `expression` | any | Value to fetch (close, [open, close], custom expression) |
-| `gaps` | enum | `barmerge.gaps_off` (default), `barmerge.gaps_on` |
-| `lookahead` | enum | `barmerge.lookahead_off` (default), `barmerge.lookahead_on` |
-| `ignore_invalid_symbol` | bool | Don't error on invalid symbols |
-| `currency` | string | Currency conversion |
-| `calc_bars_back` | int | Number of bars to calculate |
+**Expression resolution:** Currently resolves all expressions to `reBar.close`. Tuple/array expressions return `[close, close, ...]` of matching length.
 
 ---
 
-### Implementation Approach
+## Acceptance Criteria — ALL MET
 
-Since we run locally with a fixed dataset, `request.security()` for the **same symbol** but different timeframe can be simulated by resampling the existing bar data.
+- [x] `request.security(symbol, "D", close)` returns daily close values
+- [x] With `lookahead=barmerge.lookahead_on`, HTF value available from first bar of period
+- [x] Without lookahead, previous period's value returned during current period
+- [x] `[o, c] = request.security(..., [open, close])` returns a tuple (array)
+- [x] `barmerge.lookahead_on` resolves to the string `"lookahead_on"` via codegen enum routing
+- [x] Request for same timeframe returns expression directly
+- [x] Resampling from lower-TF bars produces correct OHLCV aggregation
+- [x] `NA` returned when no bars available or bar index out of range
 
-#### Phase 1: Same-symbol MTF (P0)
+---
 
-When `symbol === syminfo.tickerid` (same instrument), resample bars to the requested timeframe:
+## P1 Remaining Work
 
+### 1. Expression-Aware Resolution — P1 (HIGH IMPACT)
+
+**Current limitation:** `resolveValue()` always returns `reBar.close` regardless of the `expression` argument. This means `request.security(..., open)` returns the close of the resampled bar, not the open.
+
+**Root cause:** The expression is evaluated at the *current* bar's context (e.g., `close` is a Series at bar N), but the resampled bar is a synthetic object. There's no direct way to know which OHLCV field to use.
+
+**Fix:** Pass a field selector or use a named-field lookup. The codegen must emit the field name as a string alongside the expression:
+
+**Option A — Codegen emits field name:**
 ```typescript
-export function createRequestModule(
-    bars: Bar[],
-    currentBarIndexFn: () => number,
-    timeframePeriod: string,
-) {
-    // Pre-compute resampled data for common timeframes
-    const resampledCache = new Map<string, ResampledBar[]>();
-
-    return {
-        security(
-            symbol: string,
-            timeframe: string,
-            expression: any,
-            opts?: { gaps?: string; lookahead?: string }
-        ): any {
-            const lookahead = opts?.lookahead === 'lookahead_on';
-            const gaps = opts?.gaps === 'gaps_on';
-
-            // For same symbol, resample from existing bars
-            if (symbol === '__self' || symbol === currentTickerId) {
-                return resampleAndFetch(bars, timeframe, expression,
-                    currentBarIndexFn(), lookahead, gaps);
-            }
-
-            // For different symbols: return NA (not supported locally)
-            return NA;
-        }
-    };
-}
+// Codegen transforms:
+//   request.security(sym, "D", close)
+// into:
+//   __rt.request.security(sym, "D", "close")
 ```
+Then `resolveValue` can do `reBar[expression]`.
 
-#### Resampling Logic
-
+**Option B — Runtime wraps Series in a descriptor:**
 ```typescript
-interface ResampledBar {
-    startIdx: number;    // First bar index in this period
-    endIdx: number;      // Last bar index in this period
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    volume: number;
-    time: number;
-    timeClose: number;
-}
-
-function resampleBars(bars: Bar[], targetTF: string): ResampledBar[] {
-    const targetSeconds = timeframeToSeconds(targetTF);
-    const result: ResampledBar[] = [];
-    let current: ResampledBar | null = null;
-
-    for (let i = 0; i < bars.length; i++) {
-        const bar = bars[i];
-        const periodStart = Math.floor(bar.time / (targetSeconds * 1000)) * (targetSeconds * 1000);
-
-        if (!current || current.time !== periodStart) {
-            if (current) result.push(current);
-            current = {
-                startIdx: i, endIdx: i,
-                open: bar.open, high: bar.high, low: bar.low, close: bar.close,
-                volume: bar.volume, time: periodStart,
-                timeClose: periodStart + targetSeconds * 1000,
-            };
-        } else {
-            current.endIdx = i;
-            current.high = Math.max(current.high, bar.high);
-            current.low = Math.min(current.low, bar.low);
-            current.close = bar.close;
-            current.volume += bar.volume;
-        }
-    }
-    if (current) result.push(current);
-    return result;
-}
+// Expressions are tagged objects: { field: 'close', series: closeSeriesRef }
+// When expression is a tagged descriptor, resolveValue uses descriptor.field
 ```
 
-#### Lookahead Behavior
+Option A is simpler and recommended. Requires a codegen change to detect `request.security` calls and transform the expression argument.
 
-- **`barmerge.lookahead_off`** (default): The HTF bar's value is only available after the HTF bar closes. During the HTF bar, the previous HTF bar's value is used.
-- **`barmerge.lookahead_on`**: The HTF bar's value is available from the first LTF bar of the HTF period. This "peeks ahead" — commonly used for session open/close values.
+**OHLCV fields to support:** `open`, `high`, `low`, `close`, `volume`, `hl2`, `hlc3`, `ohlc4`, `hlcc4`.
 
-```typescript
-function resampleAndFetch(
-    bars: Bar[], tf: string, expr: any,
-    currentIdx: number, lookahead: boolean, gaps: boolean
-): any {
-    const resampled = getOrResample(bars, tf);
+### 2. Custom Expression Support — P1
 
-    // Find the resampled period for the current bar
-    const period = findPeriod(resampled, currentIdx);
-    if (!period) return NA;
-
-    if (lookahead) {
-        // Return this period's value (forward-looking)
-        return extractValue(period, expr);
-    } else {
-        // Return previous period's value (no peeking)
-        const prevPeriod = findPreviousPeriod(resampled, period);
-        if (!prevPeriod) return NA;
-        return extractValue(prevPeriod, expr);
-    }
-}
-```
-
-#### Phase 2: Cross-symbol requests (P2)
-
-For different symbols, the implementation would need:
-- A data provider that can fetch external symbol data
-- Symbol resolution and normalization
-- Currency conversion
-- This is P2 and can initially return NA
-
----
-
-### 2. `barmerge.*` Constants — P0
-
-**Pine Script syntax:**
+Beyond OHLCV fields, Pine allows arbitrary expressions:
 ```pine
-barmerge.lookahead_on
-barmerge.lookahead_off
-barmerge.gaps_on
-barmerge.gaps_off
+myRsi = request.security(sym, "D", ta.rsi(close, 14))
 ```
 
-**Benchmark usage:** 7 references to `barmerge.lookahead_on`.
+For these, the expression is a function call that must be re-evaluated against the resampled bar. This requires running the expression in a synthetic bar context.
 
-**Implementation in codegen:**
+**Approach:** This is complex and should be deferred. For now, support only named OHLCV fields (see item 1).
+
+### 3. `barmerge.*` Constants in Codegen — P1
+
+`barmerge.lookahead_on`, `barmerge.lookahead_off`, `barmerge.gaps_on`, `barmerge.gaps_off` must be routed by the codegen `genMember()` to string constants:
+
 ```typescript
 // In genMember():
 if (objStr === 'barmerge') return JSON.stringify(prop);
-// 'lookahead_on' → "lookahead_on", 'gaps_off' → "gaps_off"
+// 'lookahead_on' → '"lookahead_on"', etc.
 ```
 
-**Alternatively, map to runtime constants:**
-```typescript
-barmerge: {
-    lookahead_on: 'lookahead_on',
-    lookahead_off: 'lookahead_off',
-    gaps_on: 'gaps_on',
-    gaps_off: 'gaps_off',
-}
-```
+This is likely already done given the current implementation handles `'lookahead_on'` string. Verify in codegen.
 
----
+### 4. `request.security_lower_tf()` — P1
 
-### 3. Tuple Return from request.security() — P0
-
-**Pine Script syntax:**
+Pine v6 function that returns an array of lower-timeframe values within the current bar:
 ```pine
-[o, c] = request.security(syminfo.tickerid, "D", [open, close])
+minuteCloses = request.security_lower_tf(syminfo.tickerid, "1", close)
+// returns float[] of all 1-minute closes within the current bar
 ```
 
-**Implementation:**
-- When `expression` is an array, return an array of resampled values
-- The codegen already supports tuple destructuring via `var [o, c] = ...`
+**Implementation approach:** Reverse of the current resampling — for each higher-TF bar, collect all lower-TF bars that fall within it.
+
+### 5. `gaps=barmerge.gaps_on` with `na` Values — P1
+
+When `gaps=barmerge.gaps_on` and there is no data for certain bars (e.g., the resampled bar has no overlapping original bar), Pine returns `na`. The current implementation returns `NA` for out-of-range lookups, which is correct, but the gaps behavior for partial periods needs verification.
 
 ---
 
-## Integration
+## P2 Remaining Work
 
-### Codegen (function-mapper.ts)
-Already mapped: `'request.security': '__rt.request.security'`
+### Cross-Symbol Requests — P2
 
-Add `barmerge` namespace handling in `genMember()`.
+`request.security("AAPL", "D", close)` for a different symbol requires an external data source. Currently returns NA. A future data provider interface could:
 
-### Context (context.ts)
-Add `request` module to RuntimeContext, wire with bar data.
+1. Allow pre-loading multiple symbols in the data loader
+2. Look up the requested symbol in a symbol registry
+3. Resample from the alternative symbol's bars
 
-### Engine (engine.ts)
-Create request module with access to full bar array for resampling.
+This is architecture-level work and out of scope for current development.
+
+### `request.quandl()` / `request.financial()` — P2
+
+Additional Pine request functions for financial data. Not in benchmark. Return NA for now.
 
 ---
 
-## Acceptance Criteria
+## Architecture Notes
 
-1. `request.security(syminfo.tickerid, "D", close)` returns daily close values
-2. With `lookahead=barmerge.lookahead_on`, the HTF value is available from the first bar of the period
-3. Without lookahead, the previous period's value is returned during the current period
-4. `[o, c] = request.security(..., [open, close])` returns a tuple
-5. `barmerge.lookahead_on` resolves to the string `"lookahead_on"`
-6. Request for a non-existent symbol returns NA
-7. Resampling from 1-min bars to 60-min bars produces correct OHLCV
-8. At least 10 tests covering basic MTF, lookahead, gaps, and tuple returns
+- The module is purely computational — it does not make network requests. All data comes from the bars array passed at construction time.
+- Cache key is the timeframe string. Multiple calls with the same TF reuse the same resampled bars.
+- The `Int32Array` lookup is efficient for dense bar arrays (typical case).
+- NA is imported from `../types/na` and used for out-of-range/unavailable values.

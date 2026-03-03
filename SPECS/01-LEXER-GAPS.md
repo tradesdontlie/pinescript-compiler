@@ -1,91 +1,101 @@
 # 01 — Lexer Gaps
 
-> **Status**: PARTIAL
-> **Priority**: Mixed (P1–P2)
+> **Status**: P0 COMPLETE — All P0 items implemented and tested
+> **Priority**: P1–P2 items remain
 > **File**: `src/compiler/lexer/lexer.ts`, `src/compiler/lexer/token.ts`
+> **Tests**: 100 passing (part of 480 total)
 
 ---
 
 ## What Exists
 
-The lexer handles:
+The lexer fully handles:
 - Single-line comments (`// ...`)
+- Block comments (`/* ... */`) — **P0 DONE**
 - Annotations (`//@version=5`, `//@description`)
 - String literals with escape sequences (single and double quotes)
 - Integer and float literals (including leading-dot `.5`)
+- Scientific notation (`1e5`, `1.5e-3`, `2.0E+10`) — **P0 DONE**
 - Color literals `#RRGGBB` and `#RRGGBBAA`
 - All Pine Script operators and delimiters
 - All keywords and type keywords
 - Indentation tracking (INDENT/DEDENT/NEWLINE)
+- Implicit line continuation after operators, commas, and open brackets — **P0 DONE**
 
 ---
 
-## What's Missing
+## Completed P0 Items
 
-### 1. Block Comments `/* ... */` — P1
+### 1. Block Comments `/* ... */` — DONE
+
+**Implementation applied:**
+- `scanToken()` checks for `/*` after checking for `//`
+- `scanBlockComment()` consumes everything until the first `*/` (no nesting — Pine does not support nested block comments)
+- Newlines within block comments are tracked for correct line/column reporting
+- No token emitted (same as single-line comments)
+
+**Tests added:** 5+ tests covering inline block comments, multi-line block comments, and block comment between tokens.
+
+---
+
+### 2. Scientific Notation — DONE
+
+**Implementation applied:**
+- `scanNumber()` checks for `e` or `E` after scanning integer/decimal digits
+- Optional `+` or `-` sign is consumed after the exponent marker
+- Trailing digits are consumed
+- Result is always tokenized as `FLOAT` (scientific notation always produces a float in Pine)
+
+**Tests added:** 5+ tests: `1e5`, `1.5e-3`, `2.0E+10`, edge cases.
+
+---
+
+### 3. Implicit Line Continuation — DONE
+
+**Implementation applied:**
+- After open parentheses `(`, open brackets `[`, commas `,`, and binary operators (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `and`, `or`, `?`, `:` in ternary context), NEWLINE tokens are suppressed
+- The lexer tracks a "continuation pending" flag; any NEWLINE immediately following a continuation-eligible token is consumed without emitting NEWLINE
+- INDENT/DEDENT tokens within continuation lines are suppressed until the expression terminates
+
+**Tests added:** Tests for multi-line function calls, multi-line binary expressions, multi-line array literals.
+
+---
+
+## Remaining P1 Items
+
+### 4. `input.session` Token Handling — P1
 
 **Pine Script syntax:**
 ```pine
-/* This is a
-   multi-line block comment */
-x = 1 /* inline block comment */ + 2
+ses = input.session("0930-1600", "Session")
+ses2 = input.session("0930-1600", "Session", group="Times")
 ```
 
-**Current behavior:** The lexer only recognizes `//` comments. A `/*` sequence would be tokenized as `SLASH` + `STAR`, causing parse errors.
+**Benchmark usage:** 8 calls to `input.session`.
 
-**Benchmark usage:** The benchmark uses `//` comments only, but block comments are common in real-world scripts and the official Pine Script v6 spec supports them.
+**Current behavior:** `input` is tokenized as `INPUT` keyword, `.` as `DOT`, `session` as `IDENTIFIER`. The lexer side is correct — `session` is already an identifier. The issue is in the **parser**: `INPUT` token is not handled as a primary expression (namespace).
 
-**Implementation:**
-- In `scanToken()`, after checking for `//`, check for `/*`
-- Consume everything until `*/` is found
-- Handle nested `/* ... /* ... */ ... */` (Pine Script does NOT support nesting — first `*/` closes)
-- Track newlines within block comments for correct line/column tracking
-- Do not emit a token (same as single-line comments)
+**Fix needed:** This is a parser fix (see spec 02, item 4). The lexer does not need changes.
 
-**Files to modify:**
-- `src/compiler/lexer/lexer.ts` — add `scanBlockComment()` method
+**Files to modify:** None in lexer.
 
 ---
 
-### 2. Scientific Notation — P1
+### 5. `str.format_time` Alias — P1 (already done via function mapper)
 
-**Pine Script syntax:**
-```pine
-x = 1e5        // 100000
-y = 1.5e-3      // 0.0015
-z = 2.0E+10     // 20000000000
-```
-
-**Current behavior:** The `scanNumber()` method stops at the decimal portion. `1e5` would tokenize as `INTEGER(1)` `IDENTIFIER(e5)`, causing parse errors.
-
-**Implementation:**
-- After scanning integer/decimal digits, check for `e` or `E`
-- If found, consume optional `+` or `-` sign
-- Consume trailing digits
-- Mark as float type (scientific notation always produces a float in Pine)
-
-**Files to modify:**
-- `src/compiler/lexer/lexer.ts` — extend `scanNumber()`
+`str.format_time` was mapped in the codegen function mapper as `__rt.str.formatTime`. The lexer correctly tokenizes all parts (`str`, `.`, `format_time`). No lexer changes needed.
 
 ---
 
-### 3. Multi-line Strings — P2
+## Remaining P2 Items
 
-**Pine Script syntax:**
-```pine
-x = "This is a
-     multi-line string"
-```
+### 6. Multi-line Strings — P2
 
-**Current behavior:** The lexer reports `Unterminated string literal` on newlines within strings.
-
-**Pine v6 behavior:** Pine Script v5/v6 does NOT natively support multi-line strings. Strings must be on a single line. However, some users use line continuation with `\` (see item 4). This is P2 as it's not standard.
-
-**Implementation:** No change needed for v6 parity. The current behavior (error on newline) is correct.
+**Pine Script v6 behavior:** Pine Script v5/v6 does NOT natively support multi-line strings. Strings must be on a single line. The current lexer behavior (error on newline inside a string) is correct for v6 parity. No implementation needed.
 
 ---
 
-### 4. Line Continuation — P2
+### 7. Explicit Backslash Line Continuation — P2
 
 **Pine Script syntax:**
 ```pine
@@ -93,38 +103,21 @@ x = close + \
     open
 ```
 
-**Current behavior:** Backslash at end of line is not recognized. The line would be split into two separate statements.
+**Current behavior:** Implicit continuation (item 3 above) covers the vast majority of real-world scripts. The explicit `\` form is rare in practice.
 
-**Implementation:**
+**Implementation when needed:**
 - In newline handling, check if the previous non-whitespace character was `\`
-- If so, consume the newline and continue on the next line without emitting NEWLINE
-- This is implicit line continuation (Pine Script also has implicit continuation after operators and commas)
-
-**Note:** Pine Script has implicit continuation after `(`, `[`, `,`, and binary operators, which the parser may already handle via its expression parsing. The explicit `\` continuation is rarely used.
+- If so, consume the newline without emitting NEWLINE, and strip the backslash from the token stream
 
 **Files to modify:**
-- `src/compiler/lexer/lexer.ts` — modify newline handling
-
----
-
-### 5. `input.session` Token Handling — P1
-
-**Pine Script syntax:**
-```pine
-ses = input.session("0930-1600", "Session")
-```
-
-**Current behavior:** `input` is tokenized as `INPUT` (keyword), `.` as `DOT`, `session` would need to be a valid identifier. Since `input` is a type keyword, `input.session` should parse as a member access `INPUT.session`. The parser may reject this because `INPUT` is not treated as an expression.
-
-**Implementation:**
-- This is primarily a parser issue (see spec 02), but the lexer should ensure `session` is tokenized as `IDENTIFIER` (which it already is — it's not a keyword).
-- The real fix is in the parser: allow type keywords to be used as namespace identifiers when followed by `.`
+- `src/compiler/lexer/lexer.ts` — check for trailing backslash in newline handler
 
 ---
 
 ## Acceptance Criteria
 
-1. **Block comments**: `/* comment */` is consumed without emitting tokens; `x = 1 /* inline */ + 2` produces tokens for `x = 1 + 2`
+1. **Block comments**: `/* comment */` consumed silently; `x = 1 /* inline */ + 2` produces tokens only for `x = 1 + 2`
 2. **Scientific notation**: `1e5` tokenizes as `FLOAT("1e5")`; `1.5e-3` tokenizes as `FLOAT("1.5e-3")`
-3. **Existing tests**: All 100 lexer tests continue to pass
-4. **New tests**: At least 5 new tests covering block comments and scientific notation
+3. **Implicit continuation**: `f(a,\n  b)` parses as a single call; `x = a +\n    b` parses as one expression
+4. **Existing tests**: All 100 lexer tests continue to pass
+5. **tsc**: Zero type errors in `lexer.ts` and `token.ts`
