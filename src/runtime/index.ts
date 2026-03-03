@@ -92,6 +92,11 @@ export interface ExecutionResult {
   plotcandles: PlotCandleData[];
   plotbars: PlotBarData[];
   strategy?: StrategyResult;
+  // Drawing objects
+  lines?: any[];
+  labels?: any[];
+  boxes?: any[];
+  tables?: any[];
 }
 
 export function createRuntime(compiledCode: string, bars: Bar[]): ExecutionResult {
@@ -116,3 +121,15 @@ export { createBuiltinVariables } from './builtins/variables';
 export { createEngine } from './engine';
 export { createStrategyEngine } from './builtins/strategy';
 export type { StrategyResult, ClosedTrade, StrategyEngine } from './builtins/strategy';
+export { createLineModule } from './builtins/line';
+export type { LineObject } from './builtins/line';
+export { createLabelModule } from './builtins/label';
+export type { LabelObject } from './builtins/label';
+export { createBoxModule } from './builtins/box';
+export type { BoxObject } from './builtins/box';
+export { createTableModule } from './builtins/table';
+export type { TableObject, TableCell } from './builtins/table';
+export { createTimeFunctions } from './builtins/time-functions';
+export { inSeconds } from './builtins/timeframe';
+export { createRequestModule } from './builtins/request';
+export type { RequestModule } from './builtins/request';

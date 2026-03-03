@@ -10,6 +10,31 @@ export interface TimeframeInfo {
   isdaily: boolean;
   isweekly: boolean;
   ismonthly: boolean;
+  in_seconds: (tf?: string) => number;
+}
+
+/**
+ * Convert a timeframe period string to its duration in seconds.
+ *
+ * - Numeric strings (e.g. "1", "5", "60") are treated as minutes.
+ * - "D" → 86 400  (1 day)
+ * - "W" → 604 800 (7 days)
+ * - "M" → 2 592 000 (30 days, Pine convention)
+ *
+ * @param tf  Period string.  If omitted the caller should supply a default.
+ */
+export function inSeconds(tf: string): number {
+  if (tf === 'D') return 86400;
+  if (tf === 'W') return 604800;
+  if (tf === 'M') return 2592000;
+
+  const num = parseInt(tf, 10);
+  if (!isNaN(num)) {
+    return num * 60; // numeric periods are minutes
+  }
+
+  // Unknown format — fall back to daily
+  return 86400;
 }
 
 /**
@@ -45,5 +70,8 @@ export function createTimeframe(periodStr?: string): TimeframeInfo {
     isdaily: period === 'D',
     isweekly: period === 'W',
     ismonthly: period === 'M',
+    in_seconds(tf?: string): number {
+      return inSeconds(tf ?? period);
+    },
   };
 }

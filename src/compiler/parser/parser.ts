@@ -680,6 +680,28 @@ export class Parser {
   private parseForStmt(): ForStatement | ForInStatement {
     const loc = this.peek().loc;
     this.advance(); // consume 'for'
+
+    // Check for destructuring: for [index, value] in iterable
+    if (this.check(TokenType.LBRACKET)) {
+      this.advance(); // consume [
+      const indexTok = this.expect(TokenType.IDENTIFIER, 'Expected index variable');
+      this.expect(TokenType.COMMA, 'Expected , in for destructuring');
+      const valueTok = this.expect(TokenType.IDENTIFIER, 'Expected value variable');
+      this.expect(TokenType.RBRACKET, 'Expected ]');
+      this.expect(TokenType.IN, 'Expected in after for destructuring');
+      const iterable = this.parseExpression();
+      this.consumeNewline();
+      const body = this.parseBlock();
+      return {
+        kind: 'ForInStatement',
+        variable: valueTok.value,
+        indexVariable: indexTok.value,
+        iterable,
+        body,
+        loc,
+      } as ForInStatement;
+    }
+
     const varTok = this.expect(TokenType.IDENTIFIER, 'Expected variable name');
 
     if (this.check(TokenType.IN)) {
@@ -687,7 +709,7 @@ export class Parser {
       const iterable = this.parseExpression();
       this.consumeNewline();
       const body = this.parseBlock();
-      return { kind: 'ForInStatement', variable: varTok.value, iterable, body, loc } as ForInStatement;
+      return { kind: 'ForInStatement', variable: varTok.value, indexVariable: null, iterable, body, loc } as ForInStatement;
     }
 
     // for i = start to end [by step]
@@ -1100,16 +1122,27 @@ export class Parser {
 
   // ── Type Annotation ──────────────────────────────────────────────────────
 
+  // Drawing object and other types that can appear as type annotations
+  private static readonly DRAWING_TYPE_NAMES = new Set(['line', 'label', 'box', 'table', 'linefill', 'polyline', 'chart']);
+
   /**
    * Returns true if the current token can start a type annotation.
-   * We only auto-detect non-IDENTIFIER base types (int, float, bool, string, color)
-   * and qualifiers (const, input, simple, series).
-   * We don't treat bare IDENTIFIER as a type annotation start here to avoid
-   * ambiguity with variable names.
+   * We detect non-IDENTIFIER base types (int, float, bool, string, color),
+   * qualifiers (const, input, simple, series), and drawing object type names
+   * (line, label, box, table) when followed by an identifier.
    */
   private isTypeAnnotationStart(): boolean {
     const t = this.peek().type;
-    return TYPE_QUALIFIERS.has(t) || BASE_TYPE_KWS.has(t);
+    if (TYPE_QUALIFIERS.has(t) || BASE_TYPE_KWS.has(t)) return true;
+    // Check for drawing object type names (these are IDENTIFIER tokens)
+    if (t === TokenType.IDENTIFIER && Parser.DRAWING_TYPE_NAMES.has(this.peek().value)) {
+      // Only if followed by another identifier (the variable name)
+      // Also handle array types: line[] myVar
+      const next = this.peekAt(1);
+      if (next.type === TokenType.IDENTIFIER) return true;
+      if (next.type === TokenType.LBRACKET && this.peekAt(2).type === TokenType.RBRACKET) return true;
+    }
+    return false;
   }
 
   private parseTypeAnnotation(): TypeAnnotation {
@@ -1144,6 +1177,17 @@ export class Parser {
         typeArgs.push(this.parseTypeAnnotation());
       }
       this.expect(TokenType.GT, 'Expected > after type arguments');
+    }
+
+    // Array shorthand: float[], int[], line[], etc. → wrap as array<baseType>
+    if (this.check(TokenType.LBRACKET) && this.peekAt(1).type === TokenType.RBRACKET) {
+      this.advance(); // consume [
+      this.advance(); // consume ]
+      return {
+        qualifier,
+        baseType: 'array',
+        typeArgs: [{ qualifier: null, baseType, typeArgs }],
+      };
     }
 
     return { qualifier, baseType, typeArgs };

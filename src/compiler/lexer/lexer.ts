@@ -104,16 +104,24 @@ export class Lexer {
       const loc = this.currentLoc();
       this.consumeNewline();
       // Emit NEWLINE only if previous token is not a NEWLINE/INDENT/DEDENT
+      // and not a continuation token (implicit line continuation)
       const last = this.tokens[this.tokens.length - 1];
       if (
         last &&
         last.type !== TokenType.NEWLINE &&
         last.type !== TokenType.INDENT &&
-        last.type !== TokenType.DEDENT
+        last.type !== TokenType.DEDENT &&
+        !this.isContinuationToken(last.type)
       ) {
         this.tokens.push({ type: TokenType.NEWLINE, value: '\n', loc });
       }
       this.atLineStart = true;
+      return;
+    }
+
+    // Block comments /* */
+    if (ch === '/' && this.peekNext() === '*') {
+      this.scanBlockComment();
       return;
     }
 
@@ -149,6 +157,26 @@ export class Lexer {
 
     // Operators & delimiters
     this.scanOperator();
+  }
+
+  // ── Block Comments ───────────────────────────────────────────────────────
+
+  private scanBlockComment(): void {
+    // consume '/*'
+    this.advance();
+    this.advance();
+
+    while (!this.isAtEnd()) {
+      if (this.peek() === '*' && this.peekNext() === '/') {
+        this.advance(); // consume '*'
+        this.advance(); // consume '/'
+        return;
+      }
+      this.advance(); // advance() already tracks line/column for newlines
+    }
+
+    // Unterminated block comment - just end
+    this.reporter.error('Unterminated block comment', this.currentLoc());
   }
 
   // ── Comments / Annotations ────────────────────────────────────────────────
@@ -260,6 +288,18 @@ export class Lexer {
     if (value === '' && this.peek() === '.') {
       isFloat = true;
       value += this.advance();
+      while (!this.isAtEnd() && this.isDigit(this.peek())) {
+        value += this.advance();
+      }
+    }
+
+    // Scientific notation: e.g. 1e5, 1.5e-3, 2E+10
+    if (!this.isAtEnd() && (this.peek() === 'e' || this.peek() === 'E')) {
+      isFloat = true;
+      value += this.advance(); // consume 'e'/'E'
+      if (!this.isAtEnd() && (this.peek() === '+' || this.peek() === '-')) {
+        value += this.advance(); // consume sign
+      }
       while (!this.isAtEnd() && this.isDigit(this.peek())) {
         value += this.advance();
       }
@@ -453,6 +493,41 @@ export class Lexer {
 
   private isAlphaNumeric(ch: string): boolean {
     return this.isAlpha(ch) || this.isDigit(ch);
+  }
+
+  /** Tokens after which a newline is suppressed (implicit line continuation). */
+  private isContinuationToken(type: TokenType): boolean {
+    switch (type) {
+      case TokenType.COMMA:
+      case TokenType.LPAREN:
+      case TokenType.LBRACKET:
+      case TokenType.PLUS:
+      case TokenType.MINUS:
+      case TokenType.STAR:
+      case TokenType.SLASH:
+      case TokenType.PERCENT:
+      case TokenType.EQ:
+      case TokenType.NEQ:
+      case TokenType.LT:
+      case TokenType.GT:
+      case TokenType.LTE:
+      case TokenType.GTE:
+      case TokenType.AND:
+      case TokenType.OR:
+      case TokenType.NOT:
+      case TokenType.QUESTION:
+      case TokenType.COLON:
+      case TokenType.ASSIGN:
+      case TokenType.REASSIGN:
+      case TokenType.PLUS_ASSIGN:
+      case TokenType.MINUS_ASSIGN:
+      case TokenType.STAR_ASSIGN:
+      case TokenType.SLASH_ASSIGN:
+      case TokenType.PERCENT_ASSIGN:
+        return true;
+      default:
+        return false;
+    }
   }
 
   private isHexDigit(ch: string): boolean {

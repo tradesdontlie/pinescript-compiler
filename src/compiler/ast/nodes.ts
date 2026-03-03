@@ -114,6 +114,7 @@ export interface ForStatement extends BaseNode {
 export interface ForInStatement extends BaseNode {
   kind: 'ForInStatement';
   variable: string;
+  indexVariable: string | null;
   iterable: Expression;
   body: Statement[];
 }

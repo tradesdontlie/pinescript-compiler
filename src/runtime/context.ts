@@ -11,6 +11,11 @@ import { arrayModule } from './builtins/collections';
 import { SymInfo, createSyminfo } from './builtins/syminfo';
 import { TimeframeInfo, createTimeframe } from './builtins/timeframe';
 import { StrategyEngine, createStrategyEngine } from './builtins/strategy';
+import { createLineModule } from './builtins/line';
+import { createLabelModule } from './builtins/label';
+import { createBoxModule } from './builtins/box';
+import { createTableModule } from './builtins/table';
+import { createTimeFunctions } from './builtins/time-functions';
 import {
   PlotData,
   HlineData,
@@ -50,6 +55,30 @@ export interface RuntimeContext {
   syminfo: SymInfo;
   timeframe: TimeframeInfo;
 
+  // Drawing object modules
+  line: ReturnType<typeof createLineModule>;
+  label: ReturnType<typeof createLabelModule>;
+  box: ReturnType<typeof createBoxModule>;
+  table: ReturnType<typeof createTableModule>;
+
+  // Time functions (top-level)
+  time_close: number;
+  timenow: number;
+  hour(ts?: number, tz?: string): number;
+  minute(ts?: number, tz?: string): number;
+  second(ts?: number, tz?: string): number;
+  dayofweek(ts?: number, tz?: string): number;
+  dayofmonth(ts?: number, tz?: string): number;
+  month(ts?: number, tz?: string): number;
+  year(ts?: number, tz?: string): number;
+  timestamp(year: number, month: number, day: number, hour?: number, minute?: number, second?: number): number;
+
+  // Request module
+  request: { security: (...args: any[]) => any };
+
+  // Ticker module (stub)
+  ticker: { new: (...args: any[]) => string };
+
   // State storage
   state: Record<string, unknown>;
   persistentState: Record<string, unknown>;
@@ -77,6 +106,10 @@ export interface RuntimeContext {
   nz: typeof nz;
   fixnan: typeof fixnan;
   na: typeof NA;
+
+  // User variable series history
+  userSeriesSet(name: string, value: unknown): void;
+  userSeriesGet(name: string, offset: number): unknown;
 
   // Strategy engine
   strategy: StrategyEngine;
@@ -137,6 +170,12 @@ export function createContext(
   const plotcandles = new Map<number, PlotCandleData>();
   const plotbars = new Map<number, PlotBarData>();
   const strategyEngine = createStrategyEngine();
+  const userSeries = new Map<string, Series<any>>();
+  const lineModule = createLineModule();
+  const labelModule = createLabelModule();
+  const boxModule = createBoxModule();
+  const tableModule = createTableModule();
+  const timeFns = createTimeFunctions(() => builtins.time.get(0));
 
   const ctx: RuntimeContext = {
     // Expose Series objects directly. They have valueOf() which returns .get(0),
@@ -147,6 +186,8 @@ export function createContext(
     get close() { return builtins.close as any; },
     get volume() { return builtins.volume as any; },
     get time() { return builtins.time.get(0); },
+    get time_close() { return builtins.time.get(0); }, // approximation: same as time for now
+    get timenow() { return Date.now(); },
     get bar_index() { return currentBarIndex; },
     get hl2() { return builtins.hl2 as any; },
     get hlc3() { return builtins.hlc3 as any; },
@@ -164,6 +205,34 @@ export function createContext(
     array: arrayModule,
     syminfo: createSyminfo(),
     timeframe: createTimeframe(),
+
+    // Drawing objects
+    line: lineModule,
+    label: labelModule,
+    box: boxModule,
+    table: tableModule,
+
+    // Time functions
+    hour: timeFns.hour,
+    minute: timeFns.minute,
+    second: timeFns.second,
+    dayofweek: timeFns.dayofweek,
+    dayofmonth: timeFns.dayofmonth,
+    month: timeFns.month,
+    year: timeFns.year,
+    timestamp: timeFns.timestamp,
+
+    // Request module (stub — will be fully wired from engine)
+    request: {
+      security(..._args: any[]): any { return NA; },
+    },
+
+    // Ticker module (stub)
+    ticker: {
+      new(...args: any[]): string {
+        return args.length >= 2 ? `${args[0]}:${args[1]}` : String(args[0] ?? '');
+      },
+    },
 
     get barstate() {
       return {
@@ -333,6 +402,25 @@ export function createContext(
         low: Number(coerce(low)),
         close: Number(coerce(close)),
       });
+    },
+
+    userSeriesSet(name: string, value: unknown): void {
+      let s = userSeries.get(name);
+      if (!s) {
+        s = new Series<any>(510);
+        userSeries.set(name, s);
+      }
+      // Extract scalar from Series objects
+      const scalar = (value !== null && typeof value === 'object' && value && 'get' in (value as any))
+        ? (value as any).get(0) : value;
+      s.push(scalar);
+    },
+
+    userSeriesGet(name: string, offset: number): unknown {
+      const s = userSeries.get(name);
+      if (!s) return NA;
+      const val = s.get(offset);
+      return val === undefined ? NA : val;
     },
 
     setMetadata(meta: ScriptMetadata): void {

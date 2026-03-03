@@ -130,4 +130,85 @@ export const str = {
       return i < args.length ? String(args[i]) : `{${idx}}`;
     });
   },
+
+  /**
+   * Format a timestamp (milliseconds) using a format string.
+   *
+   * Supported tokens:
+   *   yyyy — 4-digit year        yy — 2-digit year
+   *   MM   — 2-digit month       dd — 2-digit day
+   *   HH   — 24-hour hour        hh — 12-hour hour
+   *   mm   — minute              ss — second
+   *   EEEE — full weekday name   EEE — short weekday name
+   *   a    — AM/PM
+   */
+  formatTime(timestamp: number, format: string, timezone?: string): string {
+    if (timestamp === null || timestamp === undefined) return '';
+    if (format === null || format === undefined) return '';
+
+    const d = new Date(timestamp);
+    let year: number, month: number, day: number;
+    let hour: number, minute: number, second: number;
+    let weekdayShort: string, weekdayFull: string;
+
+    if (timezone) {
+      // Timezone-aware extraction via Intl
+      const fmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric',
+        hour12: false,
+        weekday: 'long',
+      });
+      const parts = fmt.formatToParts(d);
+      const map: Record<string, string> = {};
+      for (const p of parts) {
+        map[p.type] = p.value;
+      }
+      year = parseInt(map.year, 10);
+      month = parseInt(map.month, 10);
+      day = parseInt(map.day, 10);
+      hour = parseInt(map.hour, 10);
+      if (hour === 24) hour = 0;
+      minute = parseInt(map.minute, 10);
+      second = parseInt(map.second, 10);
+      weekdayFull = map.weekday;
+      weekdayShort = weekdayFull.substring(0, 3);
+    } else {
+      // UTC
+      year = d.getUTCFullYear();
+      month = d.getUTCMonth() + 1;
+      day = d.getUTCDate();
+      hour = d.getUTCHours();
+      minute = d.getUTCMinutes();
+      second = d.getUTCSeconds();
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      weekdayFull = dayNames[d.getUTCDay()];
+      weekdayShort = weekdayFull.substring(0, 3);
+    }
+
+    const pad2 = (n: number): string => n.toString().padStart(2, '0');
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+
+    // Replace tokens — order matters: longer tokens first to avoid partial matches
+    let result = format;
+    result = result.replace(/yyyy/g, year.toString());
+    result = result.replace(/yy/g, (year % 100).toString().padStart(2, '0'));
+    result = result.replace(/EEEE/g, weekdayFull);
+    result = result.replace(/EEE/g, weekdayShort);
+    result = result.replace(/MM/g, pad2(month));
+    result = result.replace(/dd/g, pad2(day));
+    result = result.replace(/HH/g, pad2(hour));
+    result = result.replace(/hh/g, pad2(hour12));
+    result = result.replace(/mm/g, pad2(minute));
+    result = result.replace(/ss/g, pad2(second));
+    result = result.replace(/a/g, ampm);
+
+    return result;
+  },
 };

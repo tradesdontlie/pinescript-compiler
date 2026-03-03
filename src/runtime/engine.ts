@@ -5,6 +5,7 @@ import { createContext } from './context';
 import { ExecutionResult, PlotData, HlineData, FillData, BgColorData, BarColorData, PlotShapeData, PlotCharData, PlotArrowData, PlotCandleData, PlotBarData } from './index';
 import { ScriptMetadata } from '../compiler/index';
 import { StrategyResult } from './builtins/strategy';
+import { createRequestModule } from './builtins/request';
 
 export interface Engine {
   execute(compiledCode: string): ExecutionResult;
@@ -61,6 +62,14 @@ export function createEngine(bars: Bar[]): Engine {
       // Create fresh context using windowed builtins for bar-by-bar execution
       const windowedContext = createContext(windowedBuiltins, ta, bars.length);
       const winCtx = windowedContext.ctx;
+
+      // Wire request.security with full bars data
+      const requestModule = createRequestModule(
+        bars,
+        () => currentBarIdx,
+        () => 'D' // default timeframe
+      );
+      winCtx.request = requestModule;
 
       // Re-register init/execute on windowed context
       try {
@@ -129,6 +138,12 @@ export function createEngine(bars: Bar[]): Engine {
         strategyResult = windowedContext.strategyEngine.getResult();
       }
 
+      // Collect drawing objects from runtime context
+      const lines = winCtx.line?.all ?? [];
+      const labels = winCtx.label?.all ?? [];
+      const boxes = winCtx.box?.all ?? [];
+      const tables = winCtx.table?.all ?? [];
+
       return {
         metadata: meta,
         plots: plotsArray,
@@ -142,6 +157,10 @@ export function createEngine(bars: Bar[]): Engine {
         plotcandles: Array.from(windowedContext.plotcandles.values()),
         plotbars: Array.from(windowedContext.plotbars.values()),
         strategy: strategyResult,
+        lines,
+        labels,
+        boxes,
+        tables,
       };
     },
   };

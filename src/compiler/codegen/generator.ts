@@ -20,6 +20,13 @@ export interface GenerateResult {
   metadata: ScriptMetadata;
 }
 
+// Known namespaces that should NOT be treated as method-call objects
+const KNOWN_NAMESPACES = new Set([
+  'ta', 'math', 'str', 'array', 'color', 'line', 'label', 'box', 'table',
+  'request', 'syminfo', 'timeframe', 'barstate', 'strategy', 'log', 'ticker',
+  'map', 'matrix', 'input', 'chart', 'runtime',
+]);
+
 export class CodeGenerator {
   private reporter: DiagnosticReporter;
   private mapper: FunctionMapper;
@@ -27,6 +34,12 @@ export class CodeGenerator {
   // State for tracking var/varip declarations
   private varDecls: Map<string, string> = new Map(); // name -> 'var' | 'varip'
   private initLines: string[] = [];
+
+  // Phase 3: Track variables that are used with history (myVar[1])
+  private historyVars: Set<string> = new Set();
+
+  // Phase 3: Track variable types for method dispatch (name -> inferred namespace)
+  private varTypes: Map<string, string> = new Map();
 
   // Counters for plot/hline indices
   private plotIndex = 0;
@@ -76,8 +89,15 @@ export class CodeGenerator {
       plots: [],
     };
 
+    // Reset Phase 3 state
+    this.historyVars = new Set();
+    this.varTypes = new Map();
+
     // First pass: extract metadata and collect var/varip declarations
     this.firstPass(program);
+
+    // Pre-scan AST for user variables accessed with history (myVar[1])
+    this.scanForHistoryVars(program);
 
     // Second pass: generate execute body
     const executeLines: string[] = [];
@@ -182,6 +202,56 @@ export class CodeGenerator {
     }
   }
 
+  /** Pre-scan the AST for IndexExpression where object is a non-builtin identifier. */
+  private scanForHistoryVars(program: Program): void {
+    const visit = (node: any): void => {
+      if (!node || typeof node !== 'object') return;
+      if (node.kind === 'IndexExpression') {
+        const idx = node as IndexExpression;
+        if (idx.object.kind === 'IdentifierExpression') {
+          const name = (idx.object as IdentifierExpression).name;
+          if (!this.mapper.isBuiltinVar(name) && name !== 'na') {
+            this.historyVars.add(name);
+          }
+        }
+      }
+      // Recurse into all properties
+      for (const key of Object.keys(node)) {
+        const val = node[key];
+        if (Array.isArray(val)) {
+          for (const item of val) {
+            if (item && typeof item === 'object' && item.kind) visit(item);
+          }
+        } else if (val && typeof val === 'object' && val.kind) {
+          visit(val);
+        }
+      }
+    };
+    for (const stmt of program.body) visit(stmt);
+  }
+
+  /** Infer the namespace type from an RHS call expression. */
+  private inferTypeFromCall(calleeName: string): string | null {
+    if (calleeName.startsWith('array.new') || calleeName.startsWith('array.from') ||
+        calleeName.startsWith('array.copy') || calleeName.startsWith('array.slice')) return 'array';
+    if (calleeName === 'line.new' || calleeName === 'line.copy') return 'line';
+    if (calleeName === 'label.new' || calleeName === 'label.copy') return 'label';
+    if (calleeName === 'box.new' || calleeName === 'box.copy') return 'box';
+    if (calleeName === 'table.new') return 'table';
+    if (calleeName === 'map.new') return 'map';
+    if (calleeName === 'matrix.new') return 'matrix';
+    return null;
+  }
+
+  /** Infer the namespace type from a type annotation. */
+  private inferTypeFromAnnotation(baseType: string): string | null {
+    const typeMap: Record<string, string> = {
+      'array': 'array', 'line': 'line', 'label': 'label',
+      'box': 'box', 'table': 'table', 'map': 'map', 'matrix': 'matrix',
+    };
+    return typeMap[baseType] ?? null;
+  }
+
   private getLiteralValue(expr: Expression): unknown {
     if (expr.kind === 'LiteralExpression') {
       return (expr as LiteralExpression).value;
@@ -263,10 +333,27 @@ export class CodeGenerator {
       const names = decl.tupleNames.join(', ');
       const valStr = this.genExpr(decl.value);
       out.push(this.indent() + `var [${names}] = ${valStr};`);
+      // Track history and types for each tuple name
+      for (const tname of decl.tupleNames) {
+        if (this.historyVars.has(tname)) {
+          out.push(this.indent() + `__rt.userSeriesSet(${JSON.stringify(tname)}, ${tname});`);
+        }
+      }
       return;
     }
 
     const name = decl.name;
+
+    // Infer type from annotation or RHS call
+    if (decl.typeAnnotation) {
+      const inferred = this.inferTypeFromAnnotation(decl.typeAnnotation.baseType);
+      if (inferred) this.varTypes.set(name, inferred);
+    }
+    if (decl.value.kind === 'CallExpression') {
+      const calleeName = this.calleeToString((decl.value as CallExpression).callee);
+      const inferred = this.inferTypeFromCall(calleeName);
+      if (inferred) this.varTypes.set(name, inferred);
+    }
 
     if (decl.modifier === 'var') {
       // var declarations: init in __rt.state, reference as __rt.state.x
@@ -274,15 +361,28 @@ export class CodeGenerator {
       const valStr = this.genExpr(decl.value);
       this.initLines.push(`__rt.state.${name} = ${valStr};`);
       // In execute, just use __rt.state.x (no declaration needed)
+      // Emit userSeriesSet for history-tracked var/varip
+      if (this.historyVars.has(name)) {
+        const store = `__rt.state.${name}`;
+        out.push(this.indent() + `__rt.userSeriesSet(${JSON.stringify(name)}, ${store});`);
+      }
     } else if (decl.modifier === 'varip') {
       // varip declarations: init in __rt.persistentState
       this.varDecls.set(name, 'varip');
       const valStr = this.genExpr(decl.value);
       this.initLines.push(`__rt.persistentState.${name} = ${valStr};`);
+      if (this.historyVars.has(name)) {
+        const store = `__rt.persistentState.${name}`;
+        out.push(this.indent() + `__rt.userSeriesSet(${JSON.stringify(name)}, ${store});`);
+      }
     } else {
       // Plain declaration
       const valStr = this.genExpr(decl.value);
       out.push(this.indent() + `var ${name} = ${valStr};`);
+      // Emit userSeriesSet for history-tracked variables
+      if (this.historyVars.has(name)) {
+        out.push(this.indent() + `__rt.userSeriesSet(${JSON.stringify(name)}, ${name});`);
+      }
     }
   }
 
@@ -318,12 +418,20 @@ export class CodeGenerator {
         const jsOp = op; // same operators in JS
         out.push(this.indent() + `${store} ${jsOp} ${rhs};`);
       }
+      // Update user series for history tracking
+      if (targetName && this.historyVars.has(targetName)) {
+        out.push(this.indent() + `__rt.userSeriesSet(${JSON.stringify(targetName)}, ${store});`);
+      }
     } else {
       const lhsStr = this.genExpr(target);
       if (op === ':=') {
         out.push(this.indent() + `${lhsStr} = ${rhs};`);
       } else {
         out.push(this.indent() + `${lhsStr} ${op} ${rhs};`);
+      }
+      // Update user series for history tracking
+      if (targetName && this.historyVars.has(targetName)) {
+        out.push(this.indent() + `__rt.userSeriesSet(${JSON.stringify(targetName)}, ${lhsStr});`);
       }
     }
   }
@@ -376,11 +484,22 @@ export class CodeGenerator {
   private genForInStatement(stmt: ForInStatement, out: string[]): void {
     const iter = this.genExpr(stmt.iterable);
     const v = stmt.variable;
-    out.push(this.indent() + `for (var ${v} of ${iter}) {`);
-    this.indentLevel++;
-    this.generateBody(stmt.body, out);
-    this.indentLevel--;
-    out.push(this.indent() + '}');
+    if (stmt.indexVariable) {
+      // for [index, value] in arr → for (var __idx = 0; __idx < arr.length; __idx++) { var index = __idx; var value = arr[__idx]; ... }
+      const idx = stmt.indexVariable;
+      out.push(this.indent() + `for (var ${idx} = 0; ${idx} < ${iter}.length; ${idx}++) {`);
+      this.indentLevel++;
+      out.push(this.indent() + `var ${v} = ${iter}[${idx}];`);
+      this.generateBody(stmt.body, out);
+      this.indentLevel--;
+      out.push(this.indent() + '}');
+    } else {
+      out.push(this.indent() + `for (var ${v} of ${iter}) {`);
+      this.indentLevel++;
+      this.generateBody(stmt.body, out);
+      this.indentLevel--;
+      out.push(this.indent() + '}');
+    }
   }
 
   private genWhileStatement(stmt: WhileStatement, out: string[]): void {
@@ -511,6 +630,10 @@ export class CodeGenerator {
 
     // barstate properties accessed as top-level identifier
     if (name === 'barstate') return '__rt.barstate';
+
+    // Time functions used as variables (e.g. hour, minute — they're both functions and vars in Pine)
+    const timeFnVars = new Set(['hour', 'minute', 'second', 'dayofweek', 'dayofmonth', 'month', 'year']);
+    if (timeFnVars.has(name)) return `__rt.${name}()`;
 
     return name;
   }
@@ -658,6 +781,61 @@ export class CodeGenerator {
       }
 
       return `${mapped}(${args})`;
+    }
+
+    // Method syntax dispatch: obj.method(args) → __rt.{namespace}.{method}(obj, args)
+    if (call.callee.kind === 'MemberExpression') {
+      const mem = call.callee as MemberExpression;
+      // Only if object is NOT a known namespace
+      if (mem.object.kind === 'IdentifierExpression') {
+        const objName = (mem.object as IdentifierExpression).name;
+        if (!KNOWN_NAMESPACES.has(objName)) {
+          const method = mem.property;
+          // Determine the namespace from tracked type or method name
+          let ns = this.varTypes.get(objName) ?? null;
+          if (!ns) {
+            // Fall back to method name lookup
+            const arrayMethods = new Set([
+              'push', 'pop', 'size', 'get', 'set', 'shift', 'unshift', 'sort',
+              'reverse', 'clear', 'copy', 'insert', 'remove', 'includes', 'indexof',
+              'lastindexof', 'join', 'slice', 'sum', 'avg', 'max', 'min', 'first',
+              'last', 'range', 'median', 'stdev', 'variance', 'concat', 'from', 'abs',
+              'binary_search', 'binary_search_leftmost', 'binary_search_rightmost',
+              'every', 'some', 'fill', 'covariance', 'mode', 'percentile_linear_interpolation',
+              'percentile_nearest_rank', 'percentrank', 'standardize',
+            ]);
+            const drawingMethods = new Set([
+              'delete', 'copy', 'set_x1', 'set_y1', 'set_x2', 'set_y2',
+              'set_xy1', 'set_xy2', 'set_xloc', 'set_yloc', 'set_extend',
+              'set_color', 'set_style', 'set_width', 'set_text', 'set_tooltip',
+              'set_textcolor', 'set_size', 'set_textalign',
+              'set_x', 'set_y', 'set_xy',
+              'set_left', 'set_top', 'set_right', 'set_bottom',
+              'set_lefttop', 'set_rightbottom', 'set_bgcolor',
+              'set_border_color', 'set_border_width', 'set_border_style',
+              'set_text_color', 'set_text_size', 'set_text_halign', 'set_text_valign',
+              'get_x1', 'get_y1', 'get_x2', 'get_y2', 'get_price',
+              'get_x', 'get_y', 'get_text',
+              'get_left', 'get_top', 'get_right', 'get_bottom',
+            ]);
+            const tableMethods = new Set([
+              'cell', 'merge_cells', 'clear', 'set_position',
+              'set_frame_color', 'set_frame_width',
+              'cell_set_text', 'cell_set_bgcolor', 'cell_set_text_color',
+              'cell_set_text_size', 'cell_set_text_halign', 'cell_set_text_valign',
+              'cell_set_tooltip',
+            ]);
+            if (arrayMethods.has(method)) ns = 'array';
+            else if (tableMethods.has(method)) ns = 'table';
+            else if (drawingMethods.has(method)) ns = null; // can't disambiguate without type
+          }
+          if (ns) {
+            const objExpr = this.genExpr(mem.object);
+            const argsStr = call.args.length > 0 ? ', ' + this.genArgs(call.args) : '';
+            return `__rt.${ns}.${method}(${objExpr}${argsStr})`;
+          }
+        }
+      }
     }
 
     // Unknown - emit as-is but try to resolve callee expression
@@ -1014,6 +1192,61 @@ export class CodeGenerator {
     // Plot style constants: plot.style_line -> "style_line"
     if (objStr === 'plot') return JSON.stringify(prop);
 
+    // Enum constants — xloc, yloc, extend, text, position, display, barmerge, adjustment, currency, format
+    if (objStr === 'xloc') return JSON.stringify(prop); // xloc.bar_time → "bar_time"
+    if (objStr === 'yloc') return JSON.stringify(prop); // yloc.price → "price"
+    if (objStr === 'extend') return JSON.stringify(prop); // extend.none → "none"
+    if (objStr === 'text') return JSON.stringify(prop); // text.align_left → "align_left"
+    if (objStr === 'position') return JSON.stringify(prop); // position.top_right → "top_right"
+    if (objStr === 'display') return JSON.stringify(prop); // display.all → "all"
+    if (objStr === 'barmerge') return JSON.stringify(prop); // barmerge.lookahead_on → "lookahead_on"
+    if (objStr === 'format') return JSON.stringify(prop); // format.price → "price"
+    if (objStr === 'scale') return JSON.stringify(prop); // scale.right → "right"
+    if (objStr === 'adjustment') return JSON.stringify(prop); // adjustment.none → "none"
+    if (objStr === 'currency') return JSON.stringify(prop); // currency.USD → "USD"
+    if (objStr === 'order') return JSON.stringify(prop); // order.ascending → "ascending"
+    if (objStr === 'alert') return JSON.stringify(prop); // alert.freq_once_per_bar → "freq_once_per_bar"
+    if (objStr === 'font') return JSON.stringify(prop); // font.family_default → "family_default"
+    if (objStr === 'earnings') return JSON.stringify(prop);
+    if (objStr === 'dividends') return JSON.stringify(prop);
+    if (objStr === 'splits') return JSON.stringify(prop);
+    if (objStr === 'session') return JSON.stringify(prop);
+
+    // dayofweek constants: dayofweek.monday → 2 (1=Sunday, 7=Saturday)
+    if (objStr === 'dayofweek') {
+      const dayMap: Record<string, number> = {
+        sunday: 1, monday: 2, tuesday: 3, wednesday: 4,
+        thursday: 5, friday: 6, saturday: 7,
+      };
+      if (dayMap[prop] !== undefined) return String(dayMap[prop]);
+      return JSON.stringify(prop);
+    }
+
+    // hline style constants: hline.style_solid → "solid" (strip "style_" prefix)
+    if (objStr === 'hline') {
+      const stripped = prop.startsWith('style_') ? prop.slice(6) : prop;
+      return JSON.stringify(stripped);
+    }
+
+    // line style constants: line.style_solid → "solid"  +  line.new → __rt.line.new
+    if (objStr === 'line') {
+      if (prop.startsWith('style_')) return JSON.stringify(prop.slice(6));
+      // Drawing methods: line.new, line.delete, line.set_*, line.get_*, line.copy
+      return `__rt.line.${prop}`;
+    }
+
+    // label style constants: label.style_label_left → "label_left"  +  label.new → __rt.label.new
+    if (objStr === 'label') {
+      if (prop.startsWith('style_')) return JSON.stringify(prop.slice(6));
+      return `__rt.label.${prop}`;
+    }
+
+    // box style: box.new, box.delete, box.set_*, box.get_*
+    if (objStr === 'box') return `__rt.box.${prop}`;
+
+    // table: table.new, table.cell, table.merge_cells, table.delete, table.clear
+    if (objStr === 'table') return `__rt.table.${prop}`;
+
     // barstate properties
     if (objStr === '__rt.barstate' || objStr === 'barstate') {
       return `__rt.barstate.${prop}`;
@@ -1040,6 +1273,9 @@ export class CodeGenerator {
     if (objStr === 'str') return `__rt.str.${prop}`;
     if (objStr === 'array') return `__rt.array.${prop}`;
     if (objStr === 'request') return `__rt.request.${prop}`;
+    if (objStr === 'map') return `__rt.map.${prop}`;
+    if (objStr === 'matrix') return `__rt.matrix.${prop}`;
+    if (objStr === 'ticker') return `__rt.ticker.${prop}`;
 
     // log namespace
     if (objStr === 'log') return `__rt.log.${prop}`;
@@ -1056,6 +1292,10 @@ export class CodeGenerator {
       const name = (objExpr as IdentifierExpression).name;
       if (this.mapper.isBuiltinVar(name)) {
         return this.mapper.mapSeriesGet(name, idxStr);
+      }
+      // User variable history: myVar[1] → __rt.userSeriesGet("myVar", 1)
+      if (this.historyVars.has(name)) {
+        return `__rt.userSeriesGet(${JSON.stringify(name)}, ${idxStr})`;
       }
     }
 
