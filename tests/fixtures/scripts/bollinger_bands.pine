@@ -1,0 +1,6 @@
+//@version=6
+indicator("Bollinger Bands", overlay=true)
+length = 20
+mult = 2.0
+basis = ta.sma(close, length)
+plot(basis, "Basis", color.orange, 2)

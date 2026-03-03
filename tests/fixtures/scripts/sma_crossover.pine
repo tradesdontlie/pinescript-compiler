@@ -1,0 +1,6 @@
+//@version=6
+indicator("SMA Crossover", overlay=true)
+fast = ta.sma(close, 10)
+slow = ta.sma(close, 30)
+plot(fast, "Fast SMA", color.green, 2)
+plot(slow, "Slow SMA", color.red, 2)

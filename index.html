@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pine Script v6 Compiler</title>
+  <style>
+    /* ── Reset & base ──────────────────────────────────────────── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg-base:       #0d1117;
+      --bg-surface:    #161b22;
+      --bg-elevated:   #1c2128;
+      --bg-hover:      #21262d;
+      --border:        #30363d;
+      --border-subtle: #21262d;
+      --text-primary:  #e6edf3;
+      --text-secondary:#8b949e;
+      --text-muted:    #484f58;
+      --accent:        #2f81f7;
+      --accent-hover:  #388bfd;
+      --green:         #3fb950;
+      --red:           #f85149;
+      --yellow:        #d29922;
+      --font-code:     'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      --font-ui:       -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --radius:        6px;
+      --radius-lg:     10px;
+      --shadow:        0 1px 3px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.2);
+    }
+
+    html, body {
+      height: 100%;
+      font-family: var(--font-ui);
+      background: var(--bg-base);
+      color: var(--text-primary);
+      overflow: hidden;
+    }
+
+    /* ── App shell ─────────────────────────────────────────────── */
+    #app {
+      display: grid;
+      grid-template-rows: 48px 1fr 28px;
+      grid-template-columns: 1fr;
+      height: 100vh;
+    }
+
+    /* ── Top bar ───────────────────────────────────────────────── */
+    #topbar {
+      grid-row: 1;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+    }
+
+    #topbar .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+    }
+
+    #topbar .logo .badge {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--accent);
+      background: rgba(47, 129, 247, 0.12);
+      border: 1px solid rgba(47, 129, 247, 0.25);
+      border-radius: 4px;
+      padding: 1px 5px;
+      letter-spacing: 0.03em;
+    }
+
+    #topbar .divider {
+      width: 1px;
+      height: 20px;
+      background: var(--border);
+    }
+
+    #topbar .symbol-info {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+    }
+
+    #symbol-label {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    #bar-count-label {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    #topbar .spacer {
+      flex: 1;
+    }
+
+    #topbar .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ── Main content area ─────────────────────────────────────── */
+    #main {
+      grid-row: 2;
+      display: grid;
+      grid-template-columns: 35% 1fr;
+      overflow: hidden;
+    }
+
+    /* ── Left panel — editor ───────────────────────────────────── */
+    #editor-panel {
+      display: grid;
+      grid-template-rows: 36px 1fr auto auto;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    #editor-header {
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+      gap: 6px;
+    }
+
+    #editor-header .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    #editor {
+      width: 100%;
+      height: 100%;
+      padding: 14px 16px;
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      font-family: var(--font-code);
+      font-size: 13px;
+      line-height: 1.65;
+      border: none;
+      outline: none;
+      resize: none;
+      tab-size: 4;
+      caret-color: var(--accent);
+    }
+
+    #editor::selection {
+      background: rgba(47, 129, 247, 0.25);
+    }
+
+    #editor::placeholder {
+      color: var(--text-muted);
+    }
+
+    /* ── Editor toolbar ────────────────────────────────────────── */
+    #editor-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    #editor-toolbar .toolbar-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    /* ── Diagnostics ───────────────────────────────────────────── */
+    #diagnostics {
+      display: none;
+      max-height: 150px;
+      overflow-y: auto;
+      padding: 8px 12px;
+      background: var(--bg-base);
+      border-top: 1px solid var(--border);
+      font-family: var(--font-code);
+      font-size: 12px;
+    }
+
+    .diag-item {
+      padding: 3px 0;
+      line-height: 1.5;
+    }
+
+    .diag-error { color: var(--red); }
+    .diag-warn  { color: var(--yellow); }
+
+    /* ── Right panel — chart ───────────────────────────────────── */
+    #chart-panel {
+      display: grid;
+      grid-template-rows: 36px 1fr;
+      background: var(--bg-base);
+      overflow: hidden;
+    }
+
+    #chart-header {
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 8px;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    #chart-header .chart-title {
+      color: var(--text-primary);
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    #chart-header .timeframe-badge {
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--bg-hover);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      padding: 1px 6px;
+    }
+
+    #chart-header .spacer { flex: 1; }
+
+    #chart-container {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    #chart-container.drag-over::after {
+      content: 'Drop data file here';
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--accent);
+      background: rgba(47, 129, 247, 0.06);
+      border: 2px dashed var(--accent);
+      border-radius: var(--radius);
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    /* ── Status bar ────────────────────────────────────────────── */
+    #status-bar {
+      grid-row: 3;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      font-size: 12px;
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--border);
+      color: var(--text-secondary);
+      transition: color 0.15s;
+    }
+
+    .status-info    { color: var(--text-secondary); }
+    .status-success { color: var(--green); }
+    .status-error   { color: var(--red); }
+    .status-warn    { color: var(--yellow); }
+
+    /* ── Buttons ───────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 12px;
+      border-radius: var(--radius);
+      font-size: 12px;
+      font-weight: 500;
+      font-family: var(--font-ui);
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+      white-space: nowrap;
+      line-height: 1;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+
+    .btn-primary:active {
+      opacity: 0.85;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      border-color: var(--border);
+    }
+
+    .btn-ghost:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+      border-color: var(--border);
+    }
+
+    .btn-compile {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      font-size: 13px;
+      padding: 6px 16px;
+      width: 100%;
+      justify-content: center;
+    }
+
+    .btn-compile:hover {
+      background: var(--accent-hover);
+    }
+
+    /* ── Keyboard shortcut badge ───────────────────────────────── */
+    .kbd {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      font-size: 10px;
+      color: var(--text-muted);
+      border: 1px solid var(--border-subtle);
+      border-radius: 3px;
+      padding: 0 3px;
+      line-height: 15px;
+      font-family: var(--font-code);
+    }
+
+    /* ── Scrollbar ─────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+  </style>
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Top bar ──────────────────────────────────────────────── -->
+    <header id="topbar">
+      <div class="logo">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+        </svg>
+        Pine Script Compiler
+        <span class="badge">v6</span>
+      </div>
+      <div class="divider"></div>
+      <div class="symbol-info">
+        <span id="symbol-label">AAPL</span>
+        <span id="bar-count-label" style="color:var(--text-muted);font-size:12px"></span>
+        <span style="color:var(--text-muted);font-size:12px;margin-left:2px">· 1D</span>
+      </div>
+      <div class="spacer"></div>
+      <div class="top-actions">
+        <input type="file" id="file-input" accept=".json,.csv,.parquet" style="display:none" />
+        <button id="upload-btn" class="btn btn-ghost">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          Load Data
+        </button>
+      </div>
+    </header>
+
+    <!-- ── Main split layout ──────────────────────────────────── -->
+    <main id="main">
+
+      <!-- Left: editor panel -->
+      <section id="editor-panel">
+        <div id="editor-header">
+          <span class="dot"></span>
+          script.pine
+        </div>
+
+        <textarea
+          id="editor"
+          spellcheck="false"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          placeholder="// Enter your Pine Script v6 here…"
+        ></textarea>
+
+        <div id="editor-toolbar">
+          <button id="compile-btn" class="btn btn-compile">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            Run Script
+          </button>
+          <span class="toolbar-hint">
+            <span class="kbd">⌘</span><span class="kbd">↵</span>
+          </span>
+        </div>
+
+        <div id="diagnostics"></div>
+      </section>
+
+      <!-- Right: chart panel -->
+      <section id="chart-panel">
+        <div id="chart-header">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-muted)">
+            <rect x="3" y="3" width="7" height="7"/>
+            <rect x="14" y="3" width="7" height="7"/>
+            <rect x="14" y="14" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/>
+          </svg>
+          <span class="chart-title">Chart</span>
+          <span class="timeframe-badge">1D</span>
+          <div class="spacer"></div>
+          <span style="font-size:11px;color:var(--text-muted)">Drag &amp; drop data files here</span>
+        </div>
+        <div id="chart-container"></div>
+      </section>
+
+    </main>
+
+    <!-- ── Status bar ──────────────────────────────────────────── -->
+    <footer id="status-bar" class="status-info">Ready</footer>
+
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

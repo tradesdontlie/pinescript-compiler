@@ -1,0 +1,3454 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+
+//@jerryg7 
+
+// This is a special version for matt mickey
+
+//@version=5
+indicator("Hourly Time and Price [JerryG & Smitty]",shorttitle = "Hourly T & P", overlay = true, max_lines_count = 500,
+ max_labels_count = 500, max_boxes_count = 500, dynamic_requests=true, max_bars_back=5000)
+
+//========== User inputs =====================================================================
+
+// MFE/MAE Session Enables
+G1e = "MFE/MAE Session Enables"
+ses_en_tip="Each sessions group of plots can be turned on or off"
+
+i_ses_1_toggle = input.bool(defval = true, title = "H1", inline = "se1", group = G1e,tooltip=ses_en_tip)
+i_ses_2_toggle = input.bool(defval = true, title = "H2", inline = "se1", group = G1e,tooltip=ses_en_tip)
+i_ses_3_toggle = input.bool(defval = true, title = "H3", inline = "se1", group = G1e,tooltip=ses_en_tip)
+
+i_ses_5_toggle = input.bool(defval = true, title = "3 Hr", inline = "se2", group = G1e,tooltip=ses_en_tip)
+
+// Histogram Enables
+GhisEn = "3 Hr MFE Histogram"
+i_hist_1_toggle = false
+i_hist_2_toggle = false
+i_hist_3_toggle = false
+
+i_hist_5_toggle = input.bool(true, "3 Hr Histogram Enable", inline="hist_enable", group=GhisEn,
+ tooltip="3 hour MAE/MFE time histograms that shows what time in the past sessions that the MAE and MFE events occurred\n 
+ the MFE histograms go up from the baseline while MFE histograms project down from the baseline")
+
+// Preset Mode Inline Start Time Group: H and M
+SessionDay = input.string("All", "Day of week filter", options=["Mon","Tue","Wed","Thur","Fri","All"],
+ tooltip="Analysis can be day filtered or use all days for calculations")
+
+GPre="MFE/MAE 3Hr Sessions Setup"
+// preset_mode = input.bool(true, "Use Session Presets",  group=GPre,
+//  tooltip="Check this box to setup all 5 sessions automatically\nNOTE:This overrides manual sessions setup when checked
+//  \nWhat it does: Sets session 5 as HTF start time and length in mins then sets 3 or 4 LTF sub-sessions inside the HTF session span")
+preset_mode = true
+startHour   = input.int(9, "3Hr Start-   Hr", minval=0, maxval=23, inline="startTime", group=GPre)
+startMinute = input.int(0, "min", minval=0, maxval=59, inline="startTime", group=GPre,
+ tooltip="This sets the start time of the 3 Hr Session")
+// sessionLength = input.int(240, "HTF Length (minutes)", options=[30, 60, 120, 180, 240, 270, 480, 720], group=GPre,
+//  tooltip="This sets the duration of the HTF session")
+sessionLength=180
+// sessionMode = input.string("quarters", "LTF Sub-Sessions inside HTF", options=["quarters", "thirds"], group=GPre,
+//  tooltip="When set to quarters it sets up 4 LTF subsessions inside the HTF session span\nwhen set to thirds
+//  it sets up 3 LTF subsessions inside the HTF session. For example setting start time to 10 00 and HTF session length
+//  to 240 and LTF subessions to quarters will set session 5 to 4 hours long starting at 10:00AM and put 4 x 1 hour 
+//  subsessions inside it")
+sessionMode = "thirds"
+// SessionDay = input.string("All", "Day of week for Same Day", options=["Mon","Tue","Wed","Thur","Fri","All"])
+// G1 = "Manual Session Setup (MUST uncheck Session Presets above)"
+// SessionDay = "All" // default free indicator to all days only
+
+// ses_tip="Manually setup each individual session's time span.\nNote that line styles and coloring occurs in two
+//  groups. Sessions 1 - 4 are one group of colors and line styles and Session 5 is a separate set of coloring and line
+//  syles.  This faciitates the possiblity of having session 5 as a Higher Timeframe session (HTF) and sessions 1 through
+//  4 as Lower Timeframe Sessions (LTF)"
+// i_ses_1 = input.session(defval = "0600-0615", title = "Session 1 (LTF)", inline = "s1", group = G1, tooltip=ses_tip)
+// i_ses_2 = input.session(defval = "0615-0630", title = "Session 2 (LTF)", inline = "s2", group = G1, tooltip=ses_tip)
+// i_ses_3 = input.session(defval = "0630-0645", title = "Session 3 (LTF)", inline = "s3", group = G1, tooltip=ses_tip)
+// i_ses_4 = input.session(defval = "0645-0700", title = "Session 4 (LTF)", inline = "s4", group = G1, tooltip=ses_tip)
+// i_ses_5 = input.session(defval = "0600-0700", title = "Session 5 (HTF)", inline = "s5", group = G1, tooltip=ses_tip)
+i_ses_1 = "0600-0615"
+i_ses_2 = "0615-0630"
+i_ses_3 = "0630-0645"
+i_ses_4 = "0645-0700"
+i_ses_5 = "0600-0700"
+
+
+G2 = "MFE/MAE Calculations Settings"
+i_calc_mode = input.string(defval = "Both", title = "Calculation Mode", options = ["Med", "Avg", "Both"], group = G2,
+ tooltip="When plotting MFE/MAE lines you can choose to plot the data set's average, or median, or both\nWhat
+ it does?: Assume you have 10 data points then it displays the average of that data or median or both")
+i_bands_type = "Probability"
+i_bands_toggle = input.bool(defval = true, title = "Show MFE Target Zones Sess H1-3", inline="MFEbands",group = G2)
+i_bands_box_color = input.color(defval = color.new(color.green, 80), title = "", inline = "MFEbands", group = G2)
+i_s5_bands_toggle = input.bool(defval = true, title = "Show MFE Target Zone Sess 3Hr", inline="S5MFEbands",group = G2)
+i_s5_bands_box_color = input.color(defval = color.new(color.aqua, 80), title = "", inline = "S5MFEbands", group = G2)
+i_custom_bands_toggle = input.bool(defval = false, title = "Show Custom Probability MFE Zone", inline="CustomBands", group = G2)
+i_custom_bands_color = input.color(defval = color.new(color.blue, 70), title = "", inline = "CustomBands", group = G2)
+i_custom_prob_lower = input.int(defval = 30, title = "Cust Zone Lower % ", minval = 0, maxval = 100, step = 1, group = G2, inline="probcust")
+i_custom_prob_upper = input.int(defval = 10, title = "Upper %", minval = 0, maxval = 100, step = 1, group = G2, inline="probcust")
+// i_std_quarter_toggle = input.bool(defval = false, title = "Show Std Dev Quarter Lines", inline="StdQuarter", group = G2)
+// i_std_quarter_color = input.color(defval = color.gray, title = "", inline = "StdQuarter", group = G2)
+// i_std_quarter_width = input.int(defval = 1, title = "", minval = 1, maxval = 5, inline = "StdQuarter", group = G2)
+// i_std_quarter_style = input.string(defval = "solid", title = "", options = ["solid", "dotted", "dashed"], inline = "StdQuarter", group = G2)
+// i_std_multiplier = input.float(defval = 1.0, title = "Std Dev Multiplier", minval = 0.1, maxval = 3.0, step = 0.1, group = G2)
+i_std_quarter_toggle = false
+i_std_quarter_color = color.gray
+i_std_quarter_width = 1
+i_std_quarter_style = "solid"
+i_std_multiplier = 1
+
+t2_1 = "Enter the number of historic sessions (days) used for analysis. NOTE:\ndepending on
+ your Tradingview plan and chart resolution you may or may not get all the sessions set\nthe
+ indicator will use as many days lookback that are available up to the lookback days setting"
+
+i_ses_1_n = input.int(defval = 10, title = "Lookback Days", minval = 1, tooltip = t2_1, inline = "", group = G2)
+// i_ses_2_n = input.int(defval = 10, title = "Session 2", minval = 1, tooltip = t2_1, inline = "", group = G2)
+// i_ses_3_n = input.int(defval = 10, title = "Session 3", minval = 1, tooltip = t2_1, inline = "", group = G2)
+// i_ses_4_n = input.int(defval = 10, title = "Session 4", minval = 1, tooltip = t2_1, inline = "", group = G2)
+// i_ses_5_n = input.int(defval = 10, title = "Session 5", minval = 1, tooltip = t2_1, inline = "", group = G2)
+i_ses_2_n = i_ses_1_n
+i_ses_3_n = i_ses_1_n
+
+i_ses_5_n = i_ses_1_n
+G3 = "Hourly MFE/MAE Visual Styles"
+i_open_toggle = input.bool(defval = true, title = "", inline = "Open", group = G3)
+i_open_color = input.color(defval = #0c9010, title = "Open", inline = "Open", group = G3)
+i_open_width = input.int(defval = 1, title = "", minval = 0, maxval=5, inline = "Open", group = G3)
+i_open_style = input.string(defval = "dotted", title = "", options = ["solid", "dotted", "dashed"], inline = "Open", group = G3)
+i_m_toggle = input.bool(defval = true, title = "", inline = "M", group = G3)
+i_m_color = input.color(defval = color.new(color.yellow,50), title = "MAE", inline = "M", group = G3)
+i_m_width = input.int(defval = 1, title = "", minval = 0, maxval=5, inline = "M", group = G3)
+i_m_style = input.string(defval = "dotted", title = "", options = ["solid", "dotted", "dashed"], inline = "M", group = G3)
+i_d_toggle = input.bool(defval = true, title = "", inline = "D", group = G3)
+i_d_color = input.color(defval = color.new(color.yellow,50), title = "MFE", inline = "D", group = G3)
+i_d_width = input.int(defval = 1, title = "", minval = 0, maxval=5, inline = "D", group = G3)
+i_d_style = input.string(defval = "dotted", title = "", options = ["solid", "dotted", "dashed"], inline = "D", group = G3)
+i_t_toggle = input.bool(defval = true, title = "", inline = "T", group = G3)
+i_t_color = input.color(defval = color.new(color.yellow,50), title = "Time", inline = "T", group = G3)
+i_t_width = input.int(defval = 1, title = "", minval = 0, maxval=5, inline = "T", group = G3)
+i_t_style = input.string(defval = "dotted", title = "", options = ["solid", "dotted", "dashed"], inline = "T", group = G3)
+
+
+
+// Add Price Quarters control here
+// i_qtrs_toggle = input.bool(defval = false, title = "Price Qtrs", inline = "Qtrs", group = G3)
+// i_qtrs_color = input.color(defval = color.gray, title = "", inline = "Qtrs", group = G3)
+// i_qtrs_width = input.int(defval = 1, title = "", minval = 0, maxval=5, inline = "Qtrs", group = G3)
+// i_qtrs_style = input.string(defval = "dotted", title = "", options = ["solid", "dotted", "dashed"], inline = "Qtrs", group = G3)
+
+i_qtrs_toggle = false
+i_qtrs_color = color.gray
+i_qtrs_width = 1
+i_qtrs_style = "dotted"
+// Quarter shading controls for Sessions 1-4
+// i_qtrs_q1_shade = input.bool(defval = false, title = "Q1", inline = "QtrShade", group = G3)
+// i_qtrs_q1_color = input.color(defval = color.new(color.gray, 80), title = "", inline = "QtrShade", group = G3)
+// i_qtrs_q2_shade = input.bool(defval = true, title = "Q2", inline = "QtrShade", group = G3)
+// i_qtrs_q2_color = input.color(defval = color.new(color.gray, 80), title = "", inline = "QtrShade", group = G3)
+// i_qtrs_q3_shade = input.bool(defval = false, title = "Q3", inline = "QtrShade2", group = G3)
+// i_qtrs_q3_color = input.color(defval = color.new(color.gray, 80), title = "", inline = "QtrShade2", group = G3)
+// i_qtrs_q4_shade = input.bool(defval = true, title = "Q4", inline = "QtrShade2", group = G3)
+// i_qtrs_q4_color = input.color(defval = color.new(color.gray, 80), title = "", inline = "QtrShade2", group = G3)
+
+i_qtrs_q1_shade = false
+i_qtrs_q1_color = color.gray
+i_qtrs_q2_shade = false
+i_qtrs_q2_color = color.gray
+i_qtrs_q3_shade = false
+i_qtrs_q3_color = color.gray
+i_qtrs_q4_shade = false
+i_qtrs_q4_color = color.gray
+
+// i_range_toggle = input.bool(defval = false, title = "Sess Line", inline = "Range", group = G3)
+// i_range_color = input.color(defval = color.gray, title = "", inline = "Range", group = G3)
+// i_range_width = input.int(defval = 1, title = "", minval = 1, maxval=5, inline = "Range", group = G3)
+// i_range_style_str = input.string(defval = "solid", title = "", options = ["solid", "dotted", "dashed"], inline = "Range", group = G3)
+i_range_toggle = false
+i_range_color = color.gray
+i_range_width = 1
+i_range_style_str = "solid"
+// Session box outline controls
+// i_sess_box_toggle = input.bool(defval = true, title = "Sess Box", inline = "SessBox", group = G3)
+// i_sess_box_color = input.color(defval = color.gray, title = "", inline = "SessBox", group = G3)
+// i_sess_box_width = input.int(defval = 1, title = "", minval = 1, maxval=5, inline = "SessBox", group = G3)
+// i_sess_box_style_str = input.string(defval = "solid", title = "", options = ["solid", "dotted", "dashed"], inline = "SessBox", group = G3)
+i_sess_box_toggle = false
+i_sess_box_color = color.gray
+i_sess_box_width = 1
+i_sess_box_style_str = "solid"
+
+// Session box midline controls
+// i_sess_mid_toggle = input.bool(defval = true, title = "Sess Mid", inline = "SessMid", group = G3)
+// i_sess_mid_color = input.color(defval = color.gray, title = "", inline = "SessMid", group = G3)
+// i_sess_mid_width = input.int(defval = 1, title = "", minval = 1, maxval=5, inline = "SessMid", group = G3)
+// i_sess_mid_style_str = input.string(defval = "dashed", title = "", options = ["solid", "dotted", "dashed"], inline = "SessMid", group = G3)
+i_sess_mid_toggle = false
+i_sess_mid_color = color.gray
+i_sess_mid_width = 1
+i_sess_mid_style_str = "dashed"
+i_label_toggle = input.bool(defval = true, title = "MFE/MAE Labels", inline = "Labels", group = G3)
+i_label_size = input.string(defval = "Small", title = "Label Size", options = ["Tiny", "Small", "Normal", "Large", "Huge"], inline = "label size", group = G3)
+
+G4 = "3 Hr MFE/MAE Visual Styles"
+i_s5_open_toggle = input.bool(defval = true, title = "", inline = "S5_Open", group = G4)
+i_s5_open_color = input.color(defval = #0c9010, title = "Open", inline = "S5_Open", group = G4)
+i_s5_open_width = input.int(defval = 1, title = "", minval = 0, maxval=5, inline = "S5_Open", group = G4)
+i_s5_open_style = input.string(defval = "dotted", title = "", options = ["solid", "dotted", "dashed"], inline = "S5_Open", group = G4)
+i_s5_m_toggle = input.bool(defval = true, title = "", inline = "S5_M", group = G4)
+i_s5_m_color = input.color(defval = color.rgb(255, 0, 255), title = "MAE", inline = "S5_M", group = G4)
+i_s5_m_width = input.int(defval = 1, title = "", minval = 0, maxval=5, inline = "S5_M", group = G4)
+i_s5_m_style = input.string(defval = "dashed", title = "", options = ["solid", "dotted", "dashed"], inline = "S5_M", group = G4)
+i_s5_d_toggle = input.bool(defval = true, title = "", inline = "S5_D", group = G4)
+i_s5_d_color = input.color(defval = color.rgb(0, 255, 255), title = "MFE", inline = "S5_D", group = G4)
+i_s5_d_width = input.int(defval = 1, title = "", minval = 0, maxval=5, inline = "S5_D", group = G4)
+i_s5_d_style = input.string(defval = "dashed", title = "", options = ["solid", "dotted", "dashed"], inline = "S5_D", group = G4)
+i_s5_t_toggle = input.bool(defval = true, title = "", inline = "S5_T", group = G4)
+i_s5_t_color = input.color(defval = color.rgb(255, 0, 255), title = "Time", inline = "S5_T", group = G4)
+i_s5_t_width = input.int(defval = 1, title = "", minval = 0, maxval=5, inline = "S5_T", group = G4)
+i_s5_t_style = input.string(defval = "dashed", title = "", options = ["solid", "dotted", "dashed"], inline = "S5_T", group = G4)
+// Add Session 5 Price Quarters control here
+// i_s5_qtrs_toggle = input.bool(defval = false, title = "Price Qtrs", inline = "S5_Qtrs", group = G4)
+// i_s5_qtrs_color = input.color(defval = color.gray, title = "", inline = "S5_Qtrs", group = G4)
+// i_s5_qtrs_width = input.int(defval = 1, title = "", minval = 0, maxval=5, inline = "S5_Qtrs", group = G4)
+// i_s5_qtrs_style = input.string(defval = "dotted", title = "", options = ["solid", "dotted", "dashed"], inline = "S5_Qtrs", group = G4)
+i_s5_qtrs_toggle = false
+i_s5_qtrs_color = color.gray
+i_s5_qtrs_width = 1
+i_s5_qtrs_style = "dotted"
+// Quarter shading controls for Session 5
+// i_s5_qtrs_q1_shade = input.bool(defval = false, title = "Q1", inline = "S5_QtrShade", group = G4)
+// i_s5_qtrs_q1_color = input.color(defval = color.new(color.gray, 80), title = "", inline = "S5_QtrShade", group = G4)
+// i_s5_qtrs_q2_shade = input.bool(defval = false, title = "Q2", inline = "S5_QtrShade", group = G4)
+// i_s5_qtrs_q2_color = input.color(defval = color.new(color.gray, 80), title = "", inline = "S5_QtrShade", group = G4)
+// i_s5_qtrs_q3_shade = input.bool(defval = false, title = "Q3", inline = "S5_QtrShade2", group = G4)
+// i_s5_qtrs_q3_color = input.color(defval = color.new(color.gray, 80), title = "", inline = "S5_QtrShade2", group = G4)
+// i_s5_qtrs_q4_shade = input.bool(defval = false, title = "Q4", inline = "S5_QtrShade2", group = G4)
+// i_s5_qtrs_q4_color = input.color(defval = color.new(color.gray, 80), title = "", inline = "S5_QtrShade2", group = G4)
+// i_s5_range_toggle = input.bool(defval = false, title = "Sess Line", inline = "S5_Range", group = G4)
+// i_s5_range_color = input.color(defval = color.gray, title = "", inline = "S5_Range", group = G4)
+// i_s5_range_width = input.int(defval = 1, title = "", minval = 1, maxval=5, inline = "S5_Range", group = G4)
+// i_s5_range_style_str = input.string(defval = "solid", title = "", options = ["solid", "dotted", "dashed"], inline = "S5_Range", group = G4)
+
+i_s5_qtrs_q1_shade = false
+i_s5_qtrs_q1_color = color.gray
+i_s5_qtrs_q2_shade = false
+i_s5_qtrs_q2_color = color.gray
+i_s5_qtrs_q3_shade = false
+i_s5_qtrs_q3_color = color.gray
+i_s5_qtrs_q4_shade = false
+i_s5_qtrs_q4_color = color.gray
+i_s5_range_toggle = false
+i_s5_range_color = color.gray
+i_s5_range_width = 1
+i_s5_range_style_str = "solid"
+
+// Session 5 box outline controls
+// i_s5_sess_box_toggle = input.bool(defval = true, title = "Sess Box", inline = "S5_SessBox", group = G4)
+// i_s5_sess_box_color = input.color(defval = color.gray, title = "", inline = "S5_SessBox", group = G4)
+// i_s5_sess_box_width = input.int(defval = 1, title = "", minval = 1, maxval=5, inline = "S5_SessBox", group = G4)
+// i_s5_sess_box_style_str = input.string(defval = "solid", title = "", options = ["solid", "dotted", "dashed"], inline = "S5_SessBox", group = G4)
+
+i_s5_sess_box_toggle = false
+i_s5_sess_box_color = color.gray
+i_s5_sess_box_width = 1
+i_s5_sess_box_style_str = "solid"
+
+// Session 5 box midline controls
+// i_s5_sess_mid_toggle = input.bool(defval = true, title = "Sess Mid", inline = "S5_SessMid", group = G4)
+// i_s5_sess_mid_color = input.color(defval = color.gray, title = "", inline = "S5_SessMid", group = G4)
+// i_s5_sess_mid_width = input.int(defval = 1, title = "", minval = 1, maxval=5, inline = "S5_SessMid", group = G4)
+// i_s5_sess_mid_style_str = input.string(defval = "dashed", title = "", options = ["solid", "dotted", "dashed"], inline = "S5_SessMid", group = G4)
+
+i_s5_sess_mid_toggle = false
+i_s5_sess_mid_color = color.gray
+i_s5_sess_mid_width = 1
+i_s5_sess_mid_style_str = "dashed"
+GHist = "3 Hr MFE Histogram Style Settings"
+// Replace single enable checkbox and session dropdown with multiple checkboxes
+
+i_hist_mae_toggle = input.bool(true, "Show MAE Histogram", inline="mae", group=GHist)
+i_hist_mae_color = input.color(color.red, "", inline="mae", group=GHist)
+i_hist_mfe_toggle = input.bool(true, "Show MFE", inline="mae", group=GHist)
+i_hist_mfe_color = input.color(color.green, "", inline="mae", group=GHist)
+i_hist_opacity = input.int(70, "Histogram Opacity", minval=10, maxval=90, group=GHist)
+i_hist_labels = input.bool(true, "Show Count Labels", group=GHist, inline="count")
+i_hist_text_color = input.color(color.new(color.yellow,50), "", group=GHist, inline="count")
+shared_baseline_offset = input.float(1,"Histogram baseline offset below range", group=GHist,
+ tooltip="Sets the baseline position for both MAE (down) and MFE (up) histograms")
+// mae_baseline_offset = input.float(5,"MAE histogram offset below range", group=GHist)
+// mfe_baseline_offset = input.float(3,"MFE histogram offset below range", group=GHist)
+i_hist_scale_50 = input.bool(true, "50% Histogram Scale Factor", group=GHist)
+
+
+
+//========== Variables =========================================================================
+var string i_ses_1x = na
+var string i_ses_2x = na
+var string i_ses_3x = na
+var string i_ses_4x = na
+var string i_ses_5x = na
+var string TIMEZONE = "America/New_York"
+
+// string pre_ses_1 = na
+// string pre_ses_2 = na
+// string pre_ses_3 = na
+// string pre_ses_4 = na
+// string pre_ses_5 = na
+
+
+
+// Arrays for each session's MAE, MFE, Time offsets, and Open
+var float[] a_ses_1_m = array.new_float()
+var float[] a_ses_1_d = array.new_float()
+var int[]   a_ses_1_mt = array.new_int()
+var int[]   a_ses_1_dt = array.new_int()
+var float[] a_ses_2_m = array.new_float()
+var float[] a_ses_2_d = array.new_float()
+var int[]   a_ses_2_mt = array.new_int()
+var int[]   a_ses_2_dt = array.new_int()
+var float[] a_ses_3_m = array.new_float()
+var float[] a_ses_3_d = array.new_float()
+var int[]   a_ses_3_mt = array.new_int()
+var int[]   a_ses_3_dt = array.new_int()
+
+var float[] a_ses_5_m = array.new_float()
+var float[] a_ses_5_d = array.new_float()
+var int[]   a_ses_5_mt = array.new_int()
+var int[]   a_ses_5_dt = array.new_int()
+
+var float[] a_ses_1_o = array.new_float()
+var float[] a_ses_2_o = array.new_float()
+var float[] a_ses_3_o = array.new_float()
+
+var float[] a_ses_5_o = array.new_float()
+
+// NEW arrays for storing session start times (needed for Test Mode date/time)
+var int[] a_ses_1_st = array.new_int()
+var int[] a_ses_2_st = array.new_int()
+var int[] a_ses_3_st = array.new_int()
+
+var int[] a_ses_5_st = array.new_int()
+
+//========== Vertical Lines for Sessions ==============================================
+var line session_lines_1_start = na
+var line session_lines_1_end = na
+var line session_lines_2_start = na
+var line session_lines_2_end = na
+var line session_lines_3_start = na
+var line session_lines_3_end = na
+
+var line session_lines_5_start = na
+var line session_lines_5_end = na
+
+
+
+// === CONSTANTS ===
+
+
+//========== Functions ========================================================================
+
+
+
+
+// === FUNCTION: FORMAT HHMM ===
+f_fmt_hhmm(totalMins) =>
+    hh = math.floor(totalMins / 60) % 24
+    mm = math.floor(totalMins % 60)
+    str.tostring(hh, "00") + str.tostring(mm, "00")
+
+// === Helper: Get Day Number for SessionDay ===
+getDayNumber(day) =>
+    day == "Mon" ? 2 :
+     day == "Tue" ? 3 :
+     day == "Wed" ? 4 :
+     day == "Thur" ? 5 :
+     day == "Fri" ? 6 :
+     na
+
+
+// === Adjusted Session Day Append Logic ===
+getSessionSuffix(session, selectedDay) =>
+    endTimeStr = str.substring(session, 5, 9)  // characters 5–8 = HHMM end time
+    endHour = str.tonumber(str.substring(endTimeStr, 0, 2))
+    endMin  = str.tonumber(str.substring(endTimeStr, 2, 4))
+    endsAfterMidnight = endHour >= 0 and endHour < 18  // Futures usually end before 18:00
+    dayNum = getDayNumber(selectedDay)
+    adjustedDayNum = (selectedDay != "All" and not na(dayNum)) ? (endsAfterMidnight ? dayNum : dayNum - 1) : na
+    adjustedDayNum := adjustedDayNum == 0 ? 7 : adjustedDayNum
+    suffix = (selectedDay == "All" or na(adjustedDayNum)) ? "" : ":" + str.tostring(adjustedDayNum)
+    session + suffix
+
+
+
+
+f_line_style(input_var) =>
+    switch input_var
+        "dotted" => line.style_dotted
+        "dashed" => line.style_dashed
+        => line.style_solid
+
+
+
+i_range_style = f_line_style(i_range_style_str)
+i_s5_range_style = f_line_style(i_s5_range_style_str)
+i_sess_box_style = f_line_style(i_sess_box_style_str)
+i_s5_sess_box_style = f_line_style(i_s5_sess_box_style_str)
+i_sess_mid_style = f_line_style(i_sess_mid_style_str)
+i_s5_sess_mid_style = f_line_style(i_s5_sess_mid_style_str)
+
+open_style = f_line_style(i_open_style)
+m_style    = f_line_style(i_m_style)
+d_style    = f_line_style(i_d_style)
+t_style    = f_line_style(i_t_style)
+// Add these new conversions for quarter lines
+qtrs_style = f_line_style(i_qtrs_style)
+s5_open_style = f_line_style(i_s5_open_style)
+s5_m_style    = f_line_style(i_s5_m_style)
+s5_d_style    = f_line_style(i_s5_d_style)
+s5_t_style    = f_line_style(i_s5_t_style)
+// Add this conversion for Session 5 quarter lines
+s5_qtrs_style = f_line_style(i_s5_qtrs_style)
+
+f_label_size(input_var) =>
+    switch input_var
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Normal" => size.normal
+        "Large"  => size.large
+        "Huge"   => size.huge
+
+label_size = f_label_size(i_label_size)
+
+
+
+
+f_array_maint(a, new_element, array_size) =>
+    a.push(new_element)
+    if a.size() > array_size
+        a.shift()
+
+f_ext_end(int left, int right) =>
+    int ext = na
+    if timeframe.in_seconds() >= 60
+        ext := left + right * 60 * 1000
+    else if timeframe.in_seconds() < 60
+        ext := left + right * 3600 * 1000
+    ext
+
+f_man_dis(bool ses_toggle, bool ses, int ses_len) =>
+    var float o = na
+    var float h = na
+    var float l = na
+    var float c = na
+    var float m = na
+    var float d = na
+    var int ht = na
+    var int lt = na
+    var int mt = na
+    var int dt = na
+    var int left = na
+    var int right = na
+    var float m_act = na
+    var float d_act = na
+    if ses_toggle
+        if ses and not ses[1]
+            o := open
+            h := high
+            ht := time
+            l := low
+            lt := time
+            left := time
+            right := f_ext_end(time, ses_len)
+        if ses and ses[1]
+            if high >= h
+                h := high
+                ht := time
+            if low <= l
+                l := low
+                lt := time
+        if ses[1] and not ses
+            c := close[1]
+        if c >= o
+            m := o - l
+            d := h - o
+            mt := lt - left
+            dt := ht - left
+            m_act := l
+            d_act := h
+        else
+            m := h - o
+            d := o - l
+            mt := ht - left
+            dt := lt - left
+            m_act := h
+            d_act := l
+    [o, h, l, c, m, d, mt, dt, left, right]
+
+//========== Vertical Lines for Sessions ==============================================
+f_draw_vertical_line(time_val, toggle, color, width, style) =>
+    line line_obj = na
+    if toggle
+        line_obj := line.new(time_val, high, time_val, low, xloc.bar_time, extend.both, color, style, width)
+    line_obj
+
+
+f_price_line_label(bool line_toggle, bool label_toggle, int x1, float y, int x2, color _color, line_style, label_size, int _width, string label_text) =>
+    line _line = na
+    label _label = na
+    if line_toggle
+        _line := line.new(x1, y, x2, y, xloc.bar_time, extend.none, _color, line_style, _width)
+        if label_toggle
+            _label := label.new(x2, y, label_text, xloc.bar_time, yloc.price, 
+              #ffffff00, label.style_label_left, _color, label_size, text.align_left, 
+              str.format("{0,number,#.00}",y))
+    [_line, _label]
+
+f_time_line_label(bool line_toggle, bool label_toggle, int x, float y1, float y2, float y3, color _color, line_style, label_size, int _width, string label_text) =>
+    line _line = na
+    label _label = na
+    if line_toggle
+        _line := line.new(x, y1, x, y2, xloc.bar_time, extend.none, _color, line_style, _width)
+        if label_toggle
+            _label := label.new(x, y3, label_text, xloc.bar_time, yloc.price, 
+              #ffffff00, label.style_label_up, _color, label_size, text.align_center)
+    [_line, _label]
+
+
+
+f_get_percentage(array<float> a_values, float a_opens, bool useMax = false) =>
+    float result = na
+    if a_values.size() > 0 
+        float value = useMax ? a_values.max() : (i_calc_mode == "Avg" ? a_values.avg() : a_values.median())
+        float open_val = a_opens
+        if open_val != 0
+            result := math.round((value / open_val) * 100, 2)
+    result
+
+// =========  function to calculate std dev of data array for MFE ================
+// Add this function to calculate standard deviation of MFE values
+f_calculate_mfe_std(array<float> a_values) =>
+    float result = na
+    if a_values.size() > 2
+        float mean_val = a_values.avg()
+        float sum_sq_diff = 0.0
+        for i = 0 to a_values.size() - 1
+            float diff = a_values.get(i) - mean_val
+            sum_sq_diff := sum_sq_diff + (diff * diff)
+        result := math.sqrt(sum_sq_diff / (a_values.size() - 1))
+    result
+
+// Add this function to calculate 20th percentile of MFE values
+f_calculate_mfe_20th(array<float> a_values) =>
+    float result = na
+    if a_values.size() > 2
+        // Create a copy of the array and sort it
+        temp_array = array.copy(a_values)
+        // Sort the array in ascending order
+        for i = 0 to array.size(temp_array) - 2
+            for j = i + 1 to array.size(temp_array) - 1
+                if array.get(temp_array, i) > array.get(temp_array, j)
+                    temp_val = array.get(temp_array, i)
+                    array.set(temp_array, i, array.get(temp_array, j))
+                    array.set(temp_array, j, temp_val)
+        
+        // Calculate 20th percentile position
+        size = array.size(temp_array)
+        pos_20 = math.floor(size * 0.20)
+        if pos_20 >= size
+            pos_20 := size - 1
+        result := array.get(temp_array, pos_20)
+    result
+// Add this function to draw the standard deviation boxes
+f_calculate_mfe_40th(array<float> a_values) =>
+    float result = na
+    if a_values.size() > 2
+        // Create a copy of the array and sort it
+        temp_array = array.copy(a_values)
+        // Sort the array in ascending order
+        for i = 0 to array.size(temp_array) - 2
+            for j = i + 1 to array.size(temp_array) - 1
+                if array.get(temp_array, i) > array.get(temp_array, j)
+                    temp_val = array.get(temp_array, i)
+                    array.set(temp_array, i, array.get(temp_array, j))
+                    array.set(temp_array, j, temp_val)
+        
+        // Calculate 40th percentile position
+        size = array.size(temp_array)
+        pos_40 = math.floor(size * 0.34)
+        if pos_40 >= size
+            pos_40 := size - 1
+        result := array.get(temp_array, pos_40)
+    result
+// Add this function to calculate custom percentile values
+f_calculate_custom_percentile(array<float> a_values, float percentile) =>
+    float result = na
+    if a_values.size() > 2
+        // Create a copy of the array and sort it
+        temp_array = array.copy(a_values)
+        // Sort the array in ascending order
+        for i = 0 to array.size(temp_array) - 2
+            for j = i + 1 to array.size(temp_array) - 1
+                if array.get(temp_array, i) > array.get(temp_array, j)
+                    temp_val = array.get(temp_array, i)
+                    array.set(temp_array, i, array.get(temp_array, j))
+                    array.set(temp_array, j, temp_val)
+        
+        // Calculate custom percentile position
+        size = array.size(temp_array)
+        pos_custom = math.floor(size * (percentile / 100.0))
+        if pos_custom >= size
+            pos_custom := size - 1
+        result := array.get(temp_array, pos_custom)
+    result
+f_draw_mfe_bands_box(float o, float mfe_avg, float mfe_med, float mfe_std, float mfe_20th, float mfe_40th, float mfe_custom_lower, float mfe_custom_upper, int left, int right, bool is_s5) =>
+    bands_enabled = is_s5 ? i_s5_bands_toggle : i_bands_toggle
+    if bands_enabled
+        if i_bands_type == "Std Dev" and not na(mfe_std) and mfe_std > 0
+            float upper_up = o + mfe_avg + (mfe_std * i_std_multiplier)
+            float lower_up = o + mfe_avg - (mfe_std * i_std_multiplier) 
+            float upper_dn = o - mfe_avg + (mfe_std * i_std_multiplier)
+            float lower_dn = o - mfe_avg - (mfe_std * i_std_multiplier)
+            
+            /// Draw std dev boxes around MFE levels (both up and down)
+            base_color = is_s5 ? i_s5_bands_box_color : i_bands_box_color
+            box_color = is_s5 ? color.new(base_color, 85) : base_color
+            
+            box.new(left, lower_up, right, upper_up, xloc=xloc.bar_time, 
+             bgcolor=box_color, border_width=0)
+            box.new(left, upper_dn, right, lower_dn, xloc=xloc.bar_time, 
+             bgcolor=box_color, border_width=0)
+            
+            // Draw quarter lines that split each half of the std dev bands
+            if i_std_quarter_toggle
+                // Convert line style string to Pine Script line style
+                quarter_style = i_std_quarter_style == "dotted" ? line.style_dotted : 
+                               i_std_quarter_style == "dashed" ? line.style_dashed : line.style_solid
+                
+                // Calculate quarter positions for UPPER band (around +mfe_avg)
+                float upper_mean = o + mfe_avg  // The mean of upper band
+                float upper_quarter_high = upper_mean + (mfe_std * i_std_multiplier * 0.5)  // Halfway to upper edge
+                float upper_quarter_low = upper_mean - (mfe_std * i_std_multiplier * 0.5)   // Halfway to lower edge
+                
+                // Calculate quarter positions for LOWER band (around -mfe_avg)
+                float lower_mean = o - mfe_avg  // The mean of lower band
+                float lower_quarter_high = lower_mean + (mfe_std * i_std_multiplier * 0.5)  // Halfway to upper edge
+                float lower_quarter_low = lower_mean - (mfe_std * i_std_multiplier * 0.5)   // Halfway to lower edge
+                
+                // Draw the 4 quarter lines
+                line.new(left, upper_quarter_high, right, upper_quarter_high, xloc=xloc.bar_time, 
+                         extend=extend.none, color=i_std_quarter_color, style=quarter_style, width=i_std_quarter_width)
+                line.new(left, upper_quarter_low, right, upper_quarter_low, xloc=xloc.bar_time, 
+                         extend=extend.none, color=i_std_quarter_color, style=quarter_style, width=i_std_quarter_width)
+                line.new(left, lower_quarter_high, right, lower_quarter_high, xloc=xloc.bar_time, 
+                         extend=extend.none, color=i_std_quarter_color, style=quarter_style, width=i_std_quarter_width)
+                line.new(left, lower_quarter_low, right, lower_quarter_low, xloc=xloc.bar_time, 
+                         extend=extend.none, color=i_std_quarter_color, style=quarter_style, width=i_std_quarter_width)
+        
+        else if i_bands_type == "Probability" and not na(mfe_20th) and not na(mfe_med) and not na(mfe_40th)
+            // Draw main percentile box: from 20th percentile to median (50th percentile)
+            float upper_up_main = o + mfe_med     // Top at median (50th percentile)
+            float lower_up_main = o + mfe_20th    // Bottom at 20th percentile
+            float upper_dn_main = o - mfe_20th    // Top at -20th percentile
+            float lower_dn_main = o - mfe_med     // Bottom at -median (50th percentile)
+            
+            // Draw gradient overlay box: from 20th percentile to 40th percentile (80% to 60% probability zone)
+            float upper_up_gradient = o + mfe_40th    // Top at 40th percentile
+            float lower_up_gradient = o + mfe_20th    // Bottom at 20th percentile
+            float upper_dn_gradient = o - mfe_20th    // Top at -20th percentile
+            float lower_dn_gradient = o - mfe_40th    // Bottom at -40th percentile
+            
+            /// Main percentile boxes (20th to 50th percentile)
+            base_color = is_s5 ? i_s5_bands_box_color : i_bands_box_color
+            box_color_main = is_s5 ? color.new(base_color, 85) : base_color
+            
+            box.new(left, lower_up_main, right, upper_up_main, xloc=xloc.bar_time, 
+             bgcolor=box_color_main, border_width=0)
+            box.new(left, upper_dn_main, right, lower_dn_main, xloc=xloc.bar_time, 
+             bgcolor=box_color_main, border_width=0)
+            
+            // Gradient overlay boxes (20th to 40th percentile) - same color but layered on top
+            // base_color = is_s5 ? i_s5_bands_box_color : i_bands_box_color
+            box_color_gradient = is_s5 ? color.new(base_color, 75) : color.new(base_color, 70)
+            
+            box.new(left, lower_up_gradient, right, upper_up_gradient, xloc=xloc.bar_time, 
+             bgcolor=box_color_gradient, border_width=0)
+            box.new(left, upper_dn_gradient, right, lower_dn_gradient, xloc=xloc.bar_time, 
+             bgcolor=box_color_gradient, border_width=0)
+// Draw custom probability zone if enabled
+    if i_custom_bands_toggle and not na(mfe_custom_lower) and not na(mfe_custom_upper)
+        // Custom probability zones (both up and down)
+        float upper_up_custom = o + mfe_custom_upper    // Top at custom upper percentile
+        float lower_up_custom = o + mfe_custom_lower    // Bottom at custom lower percentile
+        float upper_dn_custom = o - mfe_custom_lower    // Top at -custom lower percentile
+        float lower_dn_custom = o - mfe_custom_upper    // Bottom at -custom upper percentile
+        
+        // Custom probability boxes
+        box_color_custom = is_s5 ? color.new(i_custom_bands_color, 85) : i_custom_bands_color
+        
+        box.new(left, lower_up_custom, right, upper_up_custom, xloc=xloc.bar_time, 
+         bgcolor=box_color_custom, border_width=0)
+        box.new(left, upper_dn_custom, right, lower_dn_custom, xloc=xloc.bar_time, 
+         bgcolor=box_color_custom, border_width=0)             
+//========== NEW HELPER FUNCTIONS FOR EXPANDED TABLE ==========================================
+// Add these functions after the existing f_get_percentage function and before the histogram functions
+f_ses_map(float o, float h, float l, float c, int left, int right,
+          array<float> a_ses_m, array<float> a_ses_d, array<int> a_ses_mt, array<int> a_ses_dt,
+          bool is_s5, int session_length_minutes) =>
+    m_avg   = a_ses_m.avg()
+    d_avg   = a_ses_d.avg()
+    mt_avg  = a_ses_mt.avg()
+    dt_avg  = a_ses_dt.avg()
+    d_max   = a_ses_d.max()
+    m_med   = a_ses_m.median()
+    d_med   = a_ses_d.median()
+    mt_med  = a_ses_mt.median()
+    dt_med  = a_ses_dt.median()
+    d_std = f_calculate_mfe_std(a_ses_d)
+    d_20th = f_calculate_mfe_20th(a_ses_d)
+    d_40th = f_calculate_mfe_40th(a_ses_d) 
+    // Calculate custom percentiles
+    d_custom_lower = f_calculate_custom_percentile(a_ses_d, 100 - i_custom_prob_lower)  // Convert probability to percentile
+    d_custom_upper = f_calculate_custom_percentile(a_ses_d, 100 - i_custom_prob_upper)  // Convert probability to percentile
+        // ADD THIS DEBUGGING CODE HERE:
+    // if is_s5 and a_ses_d.size() > 0  // Only debug Session 5
+    //     debug_label = label.new(left, o, 
+    //          "S5 Debug:\n" + 
+    //          "Array Size: " + str.tostring(a_ses_d.size()) + "\n" +
+    //          "20th: " + str.tostring(d_20th) + "\n" +
+    //          "34th: " + str.tostring(d_40th) + "\n" + 
+    //          "50th: " + str.tostring(d_med) + "\n" +
+    //          "Open: " + str.tostring(o) + "\n" +
+    //          "Box Top: " + str.tostring(o + d_med) + "\n" +
+    //          "Box Mid: " + str.tostring(o + d_40th) + "\n" +
+    //          "Box Bot: " + str.tostring(o + d_20th),
+    //          style=label.style_label_right, 
+    //          color=color.yellow, 
+    //          textcolor=color.black,
+    //          size=size.normal, xloc=xloc.bar_time)
+    //     label.delete(debug_label[1])
+    // Draw bands box around MFE (std dev or percentile based on user choice)
+    f_draw_mfe_bands_box(o, d_avg, d_med, d_std, d_20th, d_40th, d_custom_lower, d_custom_upper, left, right, is_s5)
+    m_val   = i_calc_mode == "Avg" ? m_avg  : m_med
+    d_val   = i_calc_mode == "Avg" ? d_avg  : d_med
+    mt_val  = i_calc_mode == "Avg" ? mt_avg : mt_med
+    dt_val  = i_calc_mode == "Avg" ? dt_avg : dt_med
+    m_time  = str.format_time(left + mt_val, "HH:mm", "America/New_York")
+    d_time  = str.format_time(left + dt_val, "HH:mm", "America/New_York")
+    mfe_label_up = i_calc_mode == "Avg" ? "+ avg MFE" : (i_calc_mode == "Med" ? "+ med MFE" : "+ MFE")
+    mfe_label_dn = i_calc_mode == "Avg" ? "- avg MFE" : (i_calc_mode == "Med" ? "- med MFE" : "- MFE")
+    mae_label_up = i_calc_mode == "Avg" ? "- avg MAE" : (i_calc_mode == "Med" ? "- med MAE" : "- MAE")
+    mae_label_dn = i_calc_mode == "Avg" ? "+ avg MAE" : (i_calc_mode == "Med" ? "+ med MAE" : "+ MAE")
+
+    // Calculate quarter values for the MFE range (up)
+    float qtr1_up = o + (d_val * 0.25)
+    float qtr2_up = o + (d_val * 0.50)
+    float qtr3_up = o + (d_val * 0.75)
+    
+    // Calculate quarter values for the MFE range (down)
+    float qtr1_dn = o - (d_val * 0.25)
+    float qtr2_dn = o - (d_val * 0.50)
+    float qtr3_dn = o - (d_val * 0.75)
+
+    // Handle "Both" mode - draw both median and average lines
+    if i_calc_mode == "Both"
+        // Draw AVERAGE lines (solid style) - use the original working coordinate logic
+// Draw single OPEN line (same for both avg and med)
+        [o_line, o_label] = f_price_line_label(is_s5 ? i_s5_open_toggle : i_open_toggle, i_label_toggle, left, o, left+mt_val+2*(time-time[1]),
+                                         is_s5 ? i_s5_open_color : i_open_color, is_s5 ? s5_open_style : open_style, label_size,
+                                         is_s5 ? i_s5_open_width : i_open_width, "O")
+        [m_up_avg_line, m_up_avg_label] = f_price_line_label(is_s5 ? i_s5_m_toggle : i_m_toggle, i_label_toggle, left, o + m_avg, left+mt_avg+2*(time-time[1]),
+                                         is_s5 ? i_s5_m_color : i_m_color, line.style_solid, label_size,
+                                         is_s5 ? i_s5_m_width : i_m_width, "- avg MAE")
+        [m_dn_avg_line, m_dn_avg_label] = f_price_line_label(is_s5 ? i_s5_m_toggle : i_m_toggle, i_label_toggle, left, o - m_avg, left+mt_avg+2*(time-time[1]),
+                                         is_s5 ? i_s5_m_color : i_m_color, line.style_solid, label_size,
+                                         is_s5 ? i_s5_m_width : i_m_width, "+ avg MAE")
+        [d_up_avg_line, d_up_avg_label] = f_price_line_label(is_s5 ? i_s5_d_toggle : i_d_toggle, i_label_toggle, left, o + d_avg, left+dt_avg+2*(time-time[1]),
+                                         is_s5 ? i_s5_d_color : i_d_color, line.style_solid, label_size,
+                                         is_s5 ? i_s5_d_width : i_d_width, "+ avg MFE")
+        [d_dn_avg_line, d_dn_avg_label] = f_price_line_label(is_s5 ? i_s5_d_toggle : i_d_toggle, i_label_toggle, left, o - d_avg, left+dt_avg+2*(time-time[1]),
+                                         is_s5 ? i_s5_d_color : i_d_color, line.style_solid, label_size,
+                                         is_s5 ? i_s5_d_width : i_d_width, "- avg MFE")
+        [d_up_avg_linex, d_up_avg_labelx] = f_price_line_label(is_s5 ? i_s5_d_toggle : i_d_toggle, i_label_toggle, left, o + d_max, left+dt_avg+2*(time-time[1]),
+                                         is_s5 ? i_s5_d_color : i_d_color, line.style_solid, label_size,
+                                         is_s5 ? i_s5_d_width : i_d_width, "+ Max MFE")
+        [d_dn_avg_linex, d_dn_avg_labelx] = f_price_line_label(is_s5 ? i_s5_d_toggle : i_d_toggle, i_label_toggle, left, o - d_max, left+dt_avg+2*(time-time[1]),
+                                         is_s5 ? i_s5_d_color : i_d_color, line.style_solid, label_size,
+                                         is_s5 ? i_s5_d_width : i_d_width, "- Max MFE")
+        [mt_avg_line, mt_avg_label] = f_time_line_label(is_s5 ? i_s5_t_toggle : i_t_toggle, i_label_toggle, left + mt_avg, o - m_avg, o + m_avg, o - d_avg,
+                                         is_s5 ? i_s5_t_color : i_t_color, line.style_solid, label_size,
+                                         is_s5 ? i_s5_t_width : i_t_width, str.format_time(left + mt_avg, "HH:mm", "America/New_York"))
+        [dt_avg_line, dt_avg_label] = f_time_line_label(is_s5 ? i_s5_t_toggle : i_t_toggle, i_label_toggle, left + dt_avg, o - d_avg, o + d_avg, o - d_avg,
+                                         is_s5 ? i_s5_t_color : i_t_color, line.style_solid, label_size,
+                                         is_s5 ? i_s5_t_width : i_t_width, str.format_time(left + dt_avg, "HH:mm", "America/New_York"))
+
+        // Draw MEDIAN lines (dotted style) - use the original working coordinate logic
+
+
+        [m_up_med_line, m_up_med_label] = f_price_line_label(is_s5 ? i_s5_m_toggle : i_m_toggle, i_label_toggle, left, o + m_med, left+mt_med+2*(time-time[1]),
+                                         is_s5 ? i_s5_m_color : i_m_color, line.style_dotted, label_size,
+                                         is_s5 ? i_s5_m_width : i_m_width, "- med MAE")
+        [m_dn_med_line, m_dn_med_label] = f_price_line_label(is_s5 ? i_s5_m_toggle : i_m_toggle, i_label_toggle, left, o - m_med, left+mt_med+2*(time-time[1]),
+                                         is_s5 ? i_s5_m_color : i_m_color, line.style_dotted, label_size,
+                                         is_s5 ? i_s5_m_width : i_m_width, "+ med MAE")
+        [d_up_med_line, d_up_med_label] = f_price_line_label(is_s5 ? i_s5_d_toggle : i_d_toggle, i_label_toggle, left, o + d_med, left+dt_med+2*(time-time[1]),
+                                         is_s5 ? i_s5_d_color : i_d_color, line.style_dotted, label_size,
+                                         is_s5 ? i_s5_d_width : i_d_width, "+ med MFE")
+        [d_dn_med_line, d_dn_med_label] = f_price_line_label(is_s5 ? i_s5_d_toggle : i_d_toggle, i_label_toggle, left, o - d_med, left+dt_med+2*(time-time[1]),
+                                         is_s5 ? i_s5_d_color : i_d_color, line.style_dotted, label_size,
+                                         is_s5 ? i_s5_d_width : i_d_width, "- med MFE")
+        [mt_med_line, mt_med_label] = f_time_line_label(is_s5 ? i_s5_t_toggle : i_t_toggle, i_label_toggle, left + mt_med, o - m_med, o + m_med, o - d_med,
+                                         is_s5 ? i_s5_t_color : i_t_color, line.style_dotted, label_size,
+                                         is_s5 ? i_s5_t_width : i_t_width, str.format_time(left + mt_med, "HH:mm", "America/New_York"))
+        [dt_med_line, dt_med_label] = f_time_line_label(is_s5 ? i_s5_t_toggle : i_t_toggle, i_label_toggle, left + dt_med, o - d_med, o + d_med, o - d_med,
+                                         is_s5 ? i_s5_t_color : i_t_color, line.style_dotted, label_size,
+                                         is_s5 ? i_s5_t_width : i_t_width, str.format_time(left + dt_med, "HH:mm", "America/New_York"))
+
+        // Clean up AVERAGE lines
+        line.delete(o_line[1]),           label.delete(o_label[1])
+        line.delete(m_up_avg_line[1]),    label.delete(m_up_avg_label[1])
+        line.delete(m_dn_avg_line[1]),    label.delete(m_dn_avg_label[1])
+        line.delete(d_up_avg_line[1]),    label.delete(d_up_avg_label[1])
+        line.delete(d_dn_avg_line[1]),    label.delete(d_dn_avg_label[1])
+        line.delete(d_up_avg_linex[1]),   label.delete(d_up_avg_labelx[1])
+        line.delete(d_dn_avg_linex[1]),   label.delete(d_dn_avg_labelx[1])
+        line.delete(mt_avg_line[1]),      label.delete(mt_avg_label[1])
+        line.delete(dt_avg_line[1]),      label.delete(dt_avg_label[1])
+
+        // Clean up MEDIAN lines
+
+        line.delete(m_up_med_line[1]),    label.delete(m_up_med_label[1])
+        line.delete(m_dn_med_line[1]),    label.delete(m_dn_med_label[1])
+        line.delete(d_up_med_line[1]),    label.delete(d_up_med_label[1])
+        line.delete(d_dn_med_line[1]),    label.delete(d_dn_med_label[1])
+        line.delete(mt_med_line[1]),      label.delete(mt_med_label[1])
+        line.delete(dt_med_line[1]),      label.delete(dt_med_label[1])
+
+    else
+        // EXACT ORIGINAL CODE - preserve all coordinate logic that was working
+        [o_line, o_label]         = f_price_line_label(is_s5 ? i_s5_open_toggle : i_open_toggle, i_label_toggle, left, o, left+mt_val+2*(time-time[1]),
+                                         is_s5 ? i_s5_open_color : i_open_color, is_s5 ? s5_open_style : open_style, label_size,
+                                         is_s5 ? i_s5_open_width : i_open_width, "O")
+        [m_up_line, m_up_label]   = f_price_line_label(is_s5 ? i_s5_m_toggle : i_m_toggle, i_label_toggle, left, o + m_val, left+mt_val+2*(time-time[1]),
+                                         is_s5 ? i_s5_m_color : i_m_color, is_s5 ? s5_m_style : m_style, label_size,
+                                         is_s5 ? i_s5_m_width : i_m_width, mae_label_up)
+        [m_dn_line, m_dn_label]   = f_price_line_label(is_s5 ? i_s5_m_toggle : i_m_toggle, i_label_toggle, left, o - m_val, left+mt_val+2*(time-time[1]),
+                                         is_s5 ? i_s5_m_color : i_m_color, is_s5 ? s5_m_style : m_style, label_size,
+                                         is_s5 ? i_s5_m_width : i_m_width, mae_label_dn)
+        [d_up_line, d_up_label]   = f_price_line_label(is_s5 ? i_s5_d_toggle : i_d_toggle, i_label_toggle, left, o + d_val, left+dt_val+2*(time-time[1]),
+                                         is_s5 ? i_s5_d_color : i_d_color, is_s5 ? s5_d_style : d_style, label_size,
+                                         is_s5 ? i_s5_d_width : i_d_width, mfe_label_up)
+        [d_dn_line, d_dn_label]   = f_price_line_label(is_s5 ? i_s5_d_toggle : i_d_toggle, i_label_toggle, left, o - d_val, left+dt_val+2*(time-time[1]),
+                                         is_s5 ? i_s5_d_color : i_d_color, is_s5 ? s5_d_style : d_style, label_size,
+                                         is_s5 ? i_s5_d_width : i_d_width, mfe_label_dn)
+        [d_up_linex, d_up_labelx] = f_price_line_label(is_s5 ? i_s5_d_toggle : i_d_toggle, i_label_toggle, left, o + d_max, left+dt_val+2*(time-time[1]),
+                                         is_s5 ? i_s5_d_color : i_d_color, is_s5 ? s5_d_style : d_style, label_size,
+                                         is_s5 ? i_s5_d_width : i_d_width, "+ Max MFE")
+        [d_dn_linex, d_dn_labelx] = f_price_line_label(is_s5 ? i_s5_d_toggle : i_d_toggle, i_label_toggle, left, o - d_max, left+dt_val+2*(time-time[1]),
+                                         is_s5 ? i_s5_d_color : i_d_color, is_s5 ? s5_d_style : d_style, label_size,
+                                         is_s5 ? i_s5_d_width : i_d_width, "- Max MFE")
+        [mt_line, mt_label]       = f_time_line_label(is_s5 ? i_s5_t_toggle : i_t_toggle, i_label_toggle, left + mt_val, o - m_val, o + m_val, o - d_val,
+                                         is_s5 ? i_s5_t_color : i_t_color, is_s5 ? s5_t_style : t_style, label_size,
+                                         is_s5 ? i_s5_t_width : i_t_width, m_time)
+        [dt_line, dt_label]       = f_time_line_label(is_s5 ? i_s5_t_toggle : i_t_toggle, i_label_toggle, left + dt_val, o - d_val, o + d_val, o - d_val,
+                                         is_s5 ? i_s5_t_color : i_t_color, is_s5 ? s5_t_style : t_style, label_size,
+                                         is_s5 ? i_s5_t_width : i_t_width, d_time)
+
+        // Clean up main lines (original cleanup)
+        line.delete(o_line[1]),       label.delete(o_label[1])
+        line.delete(m_up_line[1]),    label.delete(m_up_label[1])
+        line.delete(m_dn_line[1]),    label.delete(m_dn_label[1])
+        line.delete(d_up_line[1]),    label.delete(d_up_label[1])
+        line.delete(d_dn_line[1]),    label.delete(d_dn_label[1])
+        line.delete(d_up_linex[1]),   label.delete(d_up_labelx[1])
+        line.delete(d_dn_linex[1]),   label.delete(d_dn_labelx[1])
+        line.delete(mt_line[1]),      label.delete(mt_label[1])
+        line.delete(dt_line[1]),      label.delete(dt_label[1])
+
+// FIX: Only draw quarter lines when BOTH toggle is enabled AND arrays have data
+    quarter_toggle = is_s5 ? i_s5_qtrs_toggle : i_qtrs_toggle
+    
+    if quarter_toggle and a_ses_m.size() > 0 and a_ses_d.size() > 0
+        // Quarter lines for upward MFE range
+        [qtr1_up_line, qtr1_up_label] = f_price_line_label(true, false, left, qtr1_up, left+dt_val+2*(time-time[1]),
+                                     is_s5 ? i_s5_qtrs_color : i_qtrs_color, 
+                                     is_s5 ? s5_qtrs_style : qtrs_style, 
+                                     label_size, is_s5 ? i_s5_qtrs_width : i_qtrs_width, "25%")
+        
+        [qtr2_up_line, qtr2_up_label] = f_price_line_label(true, false, left, qtr2_up, left+dt_val+2*(time-time[1]),
+                                     is_s5 ? i_s5_qtrs_color : i_qtrs_color, 
+                                     is_s5 ? s5_qtrs_style : qtrs_style, 
+                                     label_size, is_s5 ? i_s5_qtrs_width : i_qtrs_width, "50%")
+        
+        [qtr3_up_line, qtr3_up_label] = f_price_line_label(true, false, left, qtr3_up, left+dt_val+2*(time-time[1]),
+                                     is_s5 ? i_s5_qtrs_color : i_qtrs_color, 
+                                     is_s5 ? s5_qtrs_style : qtrs_style, 
+                                     label_size, is_s5 ? i_s5_qtrs_width : i_qtrs_width, "75%")
+        
+        // Quarter lines for downward MFE range
+        [qtr1_dn_line, qtr1_dn_label] = f_price_line_label(true, false, left, qtr1_dn, left+dt_val+2*(time-time[1]),
+                                     is_s5 ? i_s5_qtrs_color : i_qtrs_color, 
+                                     is_s5 ? s5_qtrs_style : qtrs_style, 
+                                     label_size, is_s5 ? i_s5_qtrs_width : i_qtrs_width, "25%")
+        
+        [qtr2_dn_line, qtr2_dn_label] = f_price_line_label(true, false, left, qtr2_dn, left+dt_val+2*(time-time[1]),
+                                     is_s5 ? i_s5_qtrs_color : i_qtrs_color, 
+                                     is_s5 ? s5_qtrs_style : qtrs_style, 
+                                     label_size, is_s5 ? i_s5_qtrs_width : i_qtrs_width, "50%")
+        
+        [qtr3_dn_line, qtr3_dn_label] = f_price_line_label(true, false, left, qtr3_dn, left+dt_val+2*(time-time[1]),
+                                     is_s5 ? i_s5_qtrs_color : i_qtrs_color, 
+                                     is_s5 ? s5_qtrs_style : qtrs_style, 
+                                     label_size, is_s5 ? i_s5_qtrs_width : i_qtrs_width, "75%")
+
+        // Clean up quarter lines
+        line.delete(qtr1_up_line[1]), label.delete(qtr1_up_label[1])
+        line.delete(qtr2_up_line[1]), label.delete(qtr2_up_label[1])
+        line.delete(qtr3_up_line[1]), label.delete(qtr3_up_label[1])
+        line.delete(qtr1_dn_line[1]), label.delete(qtr1_dn_label[1])
+        line.delete(qtr2_dn_line[1]), label.delete(qtr2_dn_label[1])
+        line.delete(qtr3_dn_line[1]), label.delete(qtr3_dn_label[1])
+    
+f_ses_quarters_shading(float o, float d_val, int left, int session_length_minutes, bool is_s5, array<float> a_ses_m, array<float> a_ses_d, array<int> a_ses_dt, bool ses_x, bool ses_x_start) =>
+    // Time quarter shading - independent of price quarter lines
+    // Time quarter shading - independent of price quarter lines
+    if ses_x
+        // Calculate dt_val within this function
+        dt_avg  = a_ses_dt.avg()
+        dt_med  = a_ses_dt.median()
+        dt_val  = i_calc_mode == "Avg" ? dt_avg : dt_med
+        int quarter_right = left + dt_val + 2*(time-time[1])
+        
+        // Track session high and low dynamically
+        var float session_high = high
+        var float session_low = low
+        var box session_border_box = na
+        
+        // Initialize or update session high/low
+        if ses_x_start
+            // Session start
+            session_high := high
+            session_low := low
+        else if ses_x
+            // Session active - update high/low
+            session_high := math.max(session_high, high)
+            session_low := math.min(session_low, low)
+        
+        // hilo_label =label.new(bar_index+2,high,text=str.tostring(session_high)+"\n"+str.tostring(ses_x)+"\n"+str.tostring(high)+"\n"+str.tostring(ses_x_start))
+        // label.delete(hilo_label[1])
+        //========== Time Quarter Shading Boxes ==============================================
+        var box q1_up_box = na, var box q2_up_box = na, var box q3_up_box = na, var box q4_up_box = na
+        // Calculate time quarter positions
+// Calculate time quarter positions
+// Calculate time quarter positions using the actual calculated session lengths
+// Use the passed session length parameter
+        int session_length_ms = session_length_minutes * 60 * 1000
+        int session_end_time = left + session_length_ms
+        int q1_time = na
+        int q2_time = na 
+        int q3_time = na
+        int q1_time_ltf =na
+        int q2_time_ltf =na
+        int q3_time_ltf =na
+        
+        q1_time_ltf := left + (session_length_ms / 4)
+        q2_time_ltf := left + (session_length_ms * 2 / 4)  
+        q3_time_ltf := left + (session_length_ms * 3 / 4)
+        // Determine if we're in quarters or thirds mode
+        bool is_quarters_mode = sessionMode == "quarters"
+        
+        if is_quarters_mode  // for the htf calc for quarters vs thirds mode
+            // Quarters mode: 4 equal segments
+            q1_time := left + (session_length_ms / 4)
+            q2_time := left + (session_length_ms * 2 / 4)  
+            q3_time := left + (session_length_ms * 3 / 4)
+        else
+            // Thirds mode: 3 equal segments
+            q1_time := left + (session_length_ms / 3)
+            q2_time := left + (session_length_ms * 2 / 3)
+            q3_time := left + session_length_ms
+        
+        // Time quarters shading (vertical time bands)
+        // Create/update session border box
+        if ses_x_start
+            // Session start - create border box
+            border_color = is_s5 ? i_s5_sess_box_color : i_sess_box_color
+            border_width = is_s5 ? i_s5_sess_box_width : i_sess_box_width
+            session_border_box := box.new(left, session_high, session_end_time, session_low, xloc=xloc.bar_time, 
+                                         bgcolor=color.new(color.white, 100), border_color=border_color, border_width=border_width)
+        else if ses_x
+            // Session active - update border box
+            box.set_top(session_border_box, session_high)
+            box.set_bottom(session_border_box, session_low)
+        
+        // Create/update session midline
+        var line session_midline = na
+        if ses_x_start
+            // Session start - create midline
+            mid_color = is_s5 ? i_s5_sess_mid_color : i_sess_mid_color
+            mid_width = is_s5 ? i_s5_sess_mid_width : i_sess_mid_width
+            mid_style = is_s5 ? i_s5_sess_mid_style : i_sess_mid_style
+            mid_price = (session_high + session_low) / 2
+            session_midline := line.new(left, mid_price, session_end_time, mid_price, xloc=xloc.bar_time, 
+                                       color=mid_color, style=mid_style, width=mid_width)
+        else if ses_x
+            // Session active - update midline
+            mid_price = (session_high + session_low) / 2
+            line.set_y1(session_midline, mid_price)
+            line.set_y2(session_midline, mid_price)
+        
+        // Time quarters/thirds shading (vertical time bands) - use session high/low for height
+        if is_s5
+            if i_s5_qtrs_q1_shade
+                q1_up_box := box.new(left, session_high, q1_time, session_low, xloc=xloc.bar_time, bgcolor=i_s5_qtrs_q1_color, border_width=0)
+            if i_s5_qtrs_q2_shade
+                q2_up_box := box.new(q1_time, session_high, q2_time, session_low, xloc=xloc.bar_time, bgcolor=i_s5_qtrs_q2_color, border_width=0)
+            if i_s5_qtrs_q3_shade
+                if is_quarters_mode
+                    q3_up_box := box.new(q2_time, session_high, q3_time, session_low, xloc=xloc.bar_time, bgcolor=i_s5_qtrs_q3_color, border_width=0)
+                else
+                    // In thirds mode, Q3 goes from q2_time to the end
+                    q3_up_box := box.new(q2_time, session_high, session_end_time, session_low, xloc=xloc.bar_time, bgcolor=i_s5_qtrs_q3_color, border_width=0)
+            if i_s5_qtrs_q4_shade and is_quarters_mode
+                // Q4 only exists in quarters mode - use actual session end time
+                q4_up_box := box.new(q3_time, session_high, session_end_time, session_low, xloc=xloc.bar_time, bgcolor=i_s5_qtrs_q4_color, border_width=0)
+        else
+            if i_qtrs_q1_shade
+                q1_up_box := box.new(left, session_high, q1_time_ltf, session_low, xloc=xloc.bar_time, bgcolor=i_qtrs_q1_color, border_width=0)
+            if i_qtrs_q2_shade
+                q2_up_box := box.new(q1_time_ltf, session_high, q2_time_ltf, session_low, xloc=xloc.bar_time, bgcolor=i_qtrs_q2_color, border_width=0)
+            if i_qtrs_q3_shade
+                // if is_quarters_mode
+                q3_up_box := box.new(q2_time_ltf, session_high, q3_time_ltf, session_low, xloc=xloc.bar_time, bgcolor=i_qtrs_q3_color, border_width=0)
+                // else
+                //     // In thirds mode, Q3 goes from q2_time to the end
+                //     q3_up_box := box.new(q2_time, session_high, session_end_time, session_low, xloc=xloc.bar_time, bgcolor=i_qtrs_q3_color, border_width=0)
+            if i_qtrs_q4_shade // and is_quarters_mode
+                // Q4 only exists in quarters mode - use actual session end time
+                q4_up_box := box.new(q3_time_ltf, session_high, session_end_time, session_low, xloc=xloc.bar_time, bgcolor=i_qtrs_q4_color, border_width=0)
+        
+        // Clean up quarter boxes on next session start (same pattern as lines)
+        // Clean up quarter boxes and border box on next session start
+        box.delete(q1_up_box[1])
+        box.delete(q2_up_box[1]) 
+        box.delete(q3_up_box[1])
+        box.delete(q4_up_box[1])
+        // box.delete(session_border_box[1])
+
+
+
+// Calculate percentage of sessions where MAE% > MFE%
+f_get_mae_gt_mfe_percentage(array<float> a_mae, array<float> a_mfe, float a_opens) =>
+    float result = na
+    if a_mae.size() > 0 and a_mfe.size() > 0 
+        int count_mae_gt_mfe = 0
+        int total_sessions = math.min(a_mae.size(), a_mfe.size())
+        
+        for i = 0 to total_sessions - 1
+            float mae_val = a_mae.get(i)
+            float mfe_val = a_mfe.get(i)
+            float open_val = a_opens
+            
+            if not na(mae_val) and not na(mfe_val) and not na(open_val) and open_val != 0
+                float mae_pct = (mae_val / open_val) * 100
+                float mfe_pct = (mfe_val / open_val) * 100
+                
+                if mae_pct > mfe_pct
+                    count_mae_gt_mfe += 1
+        
+        if total_sessions > 0
+            result := math.round((count_mae_gt_mfe / total_sessions) * 100, 2)
+    result
+
+// Calculate percentage of sessions where MAE time > MFE time
+f_get_maet_gt_mfet_percentage(array<int> a_mae_times, array<int> a_mfe_times) =>
+    float result = na
+    if a_mae_times.size() > 0 and a_mfe_times.size() > 0
+        int count_maet_gt_mfet = 0
+        int total_sessions = math.min(a_mae_times.size(), a_mfe_times.size())
+        
+        for i = 0 to total_sessions - 1
+            int mae_time = a_mae_times.get(i)
+            int mfe_time = a_mfe_times.get(i)
+            
+            if not na(mae_time) and not na(mfe_time)
+                if mae_time > mfe_time
+                    count_maet_gt_mfet += 1
+        
+        if total_sessions > 0
+            result := math.round((count_maet_gt_mfet / total_sessions) * 100, 2)
+    result
+//============ Histogram Functions ==================
+// =========== Histogram Bin Creation =========
+// =========== Fixed Histogram Bin Creation =========
+f_create_histogram_bins(array<int> time_offsets) =>
+    if array.size(time_offsets) == 0
+        [array.new<int>(), 0]
+    else
+        bin_size_ms = timeframe.in_seconds() * 1000
+        max_time = array.max(time_offsets)
+        
+        // FIX: Ensure the last bin is included for any timeframe
+        // The bin index for max_time is floor(max_time / bin_size_ms)
+        // So we need floor(max_time / bin_size_ms) + 1 bins total
+        // This works for any chart timeframe (1min, 5min, 15min, etc.)
+        num_bins = math.floor(max_time / bin_size_ms) + 1
+        
+        bins = array.new<int>()
+        for i = 0 to num_bins - 1
+            array.push(bins, 0)
+        
+        // Count frequencies
+        for i = 0 to array.size(time_offsets) - 1
+            time_val = array.get(time_offsets, i)
+            bin_index = math.floor(time_val / bin_size_ms)
+            if bin_index >= 0 and bin_index < num_bins
+                current_count = array.get(bins, bin_index)
+                array.set(bins, bin_index, current_count + 1)
+        
+        [bins, bin_size_ms]
+
+// ==========  Histo Baseline Calculation ===========
+f_calculate_baselines(array<float> mae_values, array<float> mfe_values, float open_values) =>
+    if array.size(mae_values) == 0 or array.size(mfe_values) == 0 
+        [na, na, na]
+    else
+        median_mae = math.abs(array.median(mae_values))
+        median_mfe = math.abs(array.median(mfe_values))
+        median_open = (open_values)
+        
+        normalized_range = median_mae + median_mfe
+        // Use single baseline offset (you can use either mae_baseline_offset or mfe_baseline_offset)
+        single_baseline = median_open - median_mfe - (shared_baseline_offset * normalized_range)
+        
+        [single_baseline, single_baseline, normalized_range]
+
+// =============  Histogram Box Drawing ==============
+f_draw_histogram_boxes(array<int> bins, int bin_size_ms, float baseline, float range_height, 
+                      color box_color, int opacity, bool show_labels, int session_start_time, color label_text_color, bool plot_downward = false) =>
+    if array.size(bins) > 0
+        max_count = array.max(bins)
+        if max_count > 0
+            for i = 0 to array.size(bins) - 1
+                count = array.get(bins, i)
+                if count > 0
+                    // Calculate box dimensions
+                    x1 = session_start_time + (i * bin_size_ms)
+                    x2 = x1 + bin_size_ms
+                    
+                    // Calculate height based on direction
+                    height = count / max_count * range_height
+                    
+                    float y1 = na
+                    float y2 = na
+                    
+                    if plot_downward
+                        // MAE: Plot downward from baseline
+                        y1 := baseline
+                        y2 := baseline - height
+                    else
+                        // MFE: Plot upward from baseline
+                        y1 := baseline
+                        y2 := baseline + height
+                    
+                    // Calculate opacity
+                    box_opacity = math.max(10, 100 - (opacity * count / max_count))
+                    
+                    // Create box
+                    box.new(x1, y1, x2, y2, 
+                           xloc=xloc.bar_time, 
+                           bgcolor=color.new(box_color, math.round(box_opacity)),
+                           border_width=0,
+                           text=show_labels ? str.tostring(count) : "",
+                           text_size=size.small,
+                           text_valign=text.align_center,
+                           text_color=label_text_color)
+// ========= Histogram Functions End
+
+
+
+// ------------- Session Management --------------------------------------
+
+// Manual and Preset Mode Management 
+
+// === SESSION TIME CALCULATIONS ===
+startMinutes     = startHour * 60 + startMinute
+divisions        = sessionMode == "quarters" ? 4 : 3
+segmentLength    = sessionLength / divisions
+
+seg1_start       = startMinutes
+seg2_start       = seg1_start + segmentLength
+seg3_start       = seg2_start + segmentLength
+seg4_start       = seg3_start + segmentLength
+endUncapped      = startMinutes + sessionLength
+
+maxSessionEnd    = 17 * 60  // 1700
+shouldCap        = (startMinutes < maxSessionEnd) and (endUncapped > maxSessionEnd)
+endMinutes       = shouldCap ? maxSessionEnd : endUncapped
+lastSegmentEnd   = shouldCap ? maxSessionEnd : endUncapped
+
+// === SESSION STRING GENERATION ===
+pre_ses_1 = f_fmt_hhmm(seg1_start) + "-" + f_fmt_hhmm(seg2_start)
+pre_ses_2 = f_fmt_hhmm(seg2_start) + "-" + f_fmt_hhmm(seg3_start)
+
+pre_ses_3 = ""
+
+
+if sessionMode == "quarters"
+    pre_ses_3 := f_fmt_hhmm(seg3_start) + "-" + f_fmt_hhmm(seg4_start)
+
+else
+    pre_ses_3 := f_fmt_hhmm(seg3_start) + "-" + f_fmt_hhmm(lastSegmentEnd)
+
+
+pre_ses_5 = f_fmt_hhmm(startMinutes) + "-" + f_fmt_hhmm(endMinutes)
+
+
+if preset_mode // use presets in preset mode
+    i_ses_1:= pre_ses_1
+    i_ses_2:= pre_ses_2
+    i_ses_3:= pre_ses_3
+
+    i_ses_5:= pre_ses_5
+
+
+// === Build Session Strings with Day Logic
+i_ses_1x := getSessionSuffix(i_ses_1, SessionDay)
+i_ses_2x := getSessionSuffix(i_ses_2, SessionDay)
+i_ses_3x := getSessionSuffix(i_ses_3, SessionDay)
+
+i_ses_5x := getSessionSuffix(i_ses_5, SessionDay)
+
+// === Debug Table for Session Strings
+
+// var table debug = table.new(position.top_right, 2, 6, border_width=1)
+// if bar_index == 0
+//     table.cell(debug, 0, 0, "Session", text_color=color.yellow)
+//     table.cell(debug, 1, 0, "Value", text_color=color.yellow)
+
+// table.cell(debug, 0, 1, "ses_1")
+// table.cell(debug, 1, 1, i_ses_1x)
+// table.cell(debug, 0, 2, "ses_2")
+// table.cell(debug, 1, 2, i_ses_2x)
+// table.cell(debug, 0, 3, "ses_3")
+// table.cell(debug, 1, 3, i_ses_3x)
+// table.cell(debug, 0, 4, "ses_4")
+// table.cell(debug, 1, 4, i_ses_4x)
+// table.cell(debug, 0, 5, "ses_5")
+// table.cell(debug, 1, 5, i_ses_5x)
+
+ses_1 = not na(time("", i_ses_1x, "America/New_York"))
+ses_1_len = math.round(
+             str.tonumber(str.substring(i_ses_1, 5, 7)) * 60 +
+             str.tonumber(str.substring(i_ses_1, 7)) -
+             str.tonumber(str.substring(i_ses_1, 0, 2)) * 60 -
+             str.tonumber((str.substring(i_ses_1, 2, 4)))
+             )
+ses_2 = not na(time("", i_ses_2x, "America/New_York"))
+ses_2_len = math.round(
+             str.tonumber(str.substring(i_ses_2, 5, 7)) * 60 +
+             str.tonumber(str.substring(i_ses_2, 7)) -
+             str.tonumber(str.substring(i_ses_2, 0, 2)) * 60 -
+             str.tonumber((str.substring(i_ses_2, 2, 4)))
+             )
+ses_3 = not na(time("", i_ses_3x, "America/New_York"))
+ses_3_len = math.round(
+             str.tonumber(str.substring(i_ses_3, 5, 7)) * 60 +
+             str.tonumber(str.substring(i_ses_3, 7)) -
+             str.tonumber(str.substring(i_ses_3, 0, 2)) * 60 -
+             str.tonumber((str.substring(i_ses_3, 2, 4)))
+             )
+
+ses_5 = not na(time("", i_ses_5x, "America/New_York"))
+ses_5_len = math.round(
+             str.tonumber(str.substring(i_ses_5, 5, 7)) * 60 +
+             str.tonumber(str.substring(i_ses_5, 7)) -
+             str.tonumber(str.substring(i_ses_5, 0, 2)) * 60 -
+             str.tonumber((str.substring(i_ses_5, 2, 4)))
+             )
+var color blank = #ffffff00
+
+
+
+//========== Core Logic (original) ============================================================
+[o_1, h_1, l_1, c_1, m_1, d_1, mt_1, dt_1, left_1, right_1] = f_man_dis(i_ses_1_toggle, ses_1, ses_1_len)
+[o_2, h_2, l_2, c_2, m_2, d_2, mt_2, dt_2, left_2, right_2] = f_man_dis(i_ses_2_toggle, ses_2, ses_2_len)
+[o_3, h_3, l_3, c_3, m_3, d_3, mt_3, dt_3, left_3, right_3] = f_man_dis(i_ses_3_toggle, ses_3, ses_3_len)
+
+[o_5, h_5, l_5, c_5, m_5, d_5, mt_5, dt_5, left_5, right_5] = f_man_dis(i_ses_5_toggle, ses_5, ses_5_len)
+
+ses_1_start = ses_1 and not ses_1[1]
+ses_2_start = ses_2 and not ses_2[1]
+ses_3_start = ses_3 and not ses_3[1]
+
+ses_5_start = ses_5 and not ses_5[1]
+if ses_1_start // we only want to draw map lines at the start of a session
+    f_ses_map(o_1, h_1, l_1, c_1, left_1, right_1, a_ses_1_m, a_ses_1_d, a_ses_1_mt, a_ses_1_dt, false, ses_1_len)
+if ses_1
+    f_ses_quarters_shading(o_1, d_1, left_1, ses_1_len, false, a_ses_1_m, a_ses_1_d, a_ses_1_dt, ses_1,ses_1_start)
+if ses_2_start
+    f_ses_map(o_2, h_2, l_2, c_2, left_2, right_2, a_ses_2_m, a_ses_2_d, a_ses_2_mt, a_ses_2_dt, false, ses_2_len)
+if ses_2
+    f_ses_quarters_shading(o_2, d_2, left_2, ses_2_len, false, a_ses_2_m, a_ses_2_d, a_ses_2_dt, ses_2,ses_2_start)
+if ses_3_start
+    f_ses_map(o_3, h_3, l_3, c_3, left_3, right_3, a_ses_3_m, a_ses_3_d, a_ses_3_mt, a_ses_3_dt, false, ses_3_len)
+if ses_3
+    f_ses_quarters_shading(o_3, d_3, left_3, ses_3_len, false, a_ses_3_m, a_ses_3_d, a_ses_3_dt, ses_3,ses_3_start )
+
+if ses_5_start
+    f_ses_map(o_5, h_5, l_5, c_5, left_5, right_5, a_ses_5_m, a_ses_5_d, a_ses_5_mt, a_ses_5_dt, true, ses_5_len)
+if ses_5
+    f_ses_quarters_shading(o_5, d_5, left_5, ses_5_len, true, a_ses_5_m, a_ses_5_d, a_ses_5_dt, ses_5,ses_5_start)
+
+//========== Implementing Vertical Lines ==============================================
+if ses_1 and not ses_1[1] and i_ses_1_toggle
+    start1 = time
+    // Delete old lines before creating new ones
+    line.delete(session_lines_1_start)
+    line.delete(session_lines_1_end)
+    session_lines_1_start := f_draw_vertical_line(start1, i_range_toggle, i_range_color, i_range_width, i_range_style)
+    session_lines_1_end := f_draw_vertical_line(right_1, i_range_toggle, i_range_color, i_range_width, i_range_style)
+
+if ses_2 and not ses_2[1] and i_ses_2_toggle
+    start2=time
+    // Delete old lines before creating new ones
+    line.delete(session_lines_2_start)
+    line.delete(session_lines_2_end)
+    session_lines_2_start := f_draw_vertical_line(start2, i_range_toggle, i_range_color, i_range_width, i_range_style)
+    session_lines_2_end := f_draw_vertical_line(right_2, i_range_toggle, i_range_color, i_range_width, i_range_style)
+
+if ses_3 and not ses_3[1] and i_ses_3_toggle
+    start3 = time
+    // Delete old lines before creating new ones
+    line.delete(session_lines_3_start)
+    line.delete(session_lines_3_end)
+    session_lines_3_start := f_draw_vertical_line(start3, i_range_toggle, i_range_color, i_range_width, i_range_style)
+    session_lines_3_end := f_draw_vertical_line(right_3, i_range_toggle, i_range_color, i_range_width, i_range_style)
+
+
+if ses_5 and not ses_5[1] and i_ses_5_toggle
+    start5=time
+    // Delete old lines before creating new ones
+    line.delete(session_lines_5_start)
+    line.delete(session_lines_5_end)
+    session_lines_5_start := f_draw_vertical_line(start5, i_s5_range_toggle, i_s5_range_color, i_s5_range_width, i_s5_range_style)
+    session_lines_5_end := f_draw_vertical_line(right_5, i_s5_range_toggle, i_s5_range_color, i_s5_range_width, i_s5_range_style)
+
+// When each session ends, store final data into arrays
+if ses_1[1] and not ses_1
+    f_array_maint(a_ses_1_m, m_1, i_ses_1_n)
+    f_array_maint(a_ses_1_d, d_1, i_ses_1_n)
+    f_array_maint(a_ses_1_mt, mt_1, i_ses_1_n)
+    f_array_maint(a_ses_1_dt, dt_1, i_ses_1_n)
+    f_array_maint(a_ses_1_o,  o_1, i_ses_1_n)
+    // Store session start time so we can display date/time in Test Mode
+    f_array_maint(a_ses_1_st, left_1, i_ses_1_n)
+
+if ses_2[1] and not ses_2
+    f_array_maint(a_ses_2_m, m_2, i_ses_2_n)
+    f_array_maint(a_ses_2_d, d_2, i_ses_2_n)
+    f_array_maint(a_ses_2_mt, mt_2, i_ses_2_n)
+    f_array_maint(a_ses_2_dt, dt_2, i_ses_2_n)
+    f_array_maint(a_ses_2_o,  o_2, i_ses_2_n)
+    f_array_maint(a_ses_2_st, left_2, i_ses_2_n)
+
+if ses_3[1] and not ses_3
+    f_array_maint(a_ses_3_m, m_3, i_ses_3_n)
+    f_array_maint(a_ses_3_d, d_3, i_ses_3_n)
+    f_array_maint(a_ses_3_mt, mt_3, i_ses_3_n)
+    f_array_maint(a_ses_3_dt, dt_3, i_ses_3_n)
+    f_array_maint(a_ses_3_o,  o_3, i_ses_3_n)
+    f_array_maint(a_ses_3_st, left_3, i_ses_3_n)
+
+
+
+if ses_5[1] and not ses_5
+    f_array_maint(a_ses_5_m, m_5, i_ses_5_n)
+    f_array_maint(a_ses_5_d, d_5, i_ses_5_n)
+    f_array_maint(a_ses_5_mt, mt_5, i_ses_5_n)
+    f_array_maint(a_ses_5_dt, dt_5, i_ses_5_n)
+    f_array_maint(a_ses_5_o,  o_5, i_ses_5_n)
+    f_array_maint(a_ses_5_st, left_5, i_ses_5_n)
+
+
+//=============  Histogram Plotting ==============
+// Fixed histogram implementation - Session 1
+if i_hist_1_toggle and ses_1 and not ses_1[1] and i_ses_1_toggle and array.size(a_ses_1_m) >= 3 and array.size(a_ses_1_d) >= 3
+    [mae_baseline, mfe_baseline, norm_range] = f_calculate_baselines(a_ses_1_m, a_ses_1_d, o_1)
+    if not na(mae_baseline) and not na(mfe_baseline) and norm_range > 0
+        current_session_start = time
+        if i_hist_mae_toggle and array.size(a_ses_1_mt) > 0
+            [mae_bins, mae_bin_size] = f_create_histogram_bins(a_ses_1_mt)
+            if array.size(mae_bins) > 0
+                f_draw_histogram_boxes(mae_bins, mae_bin_size, mae_baseline, i_hist_scale_50 ? norm_range * 0.5 : norm_range, 
+                 i_hist_mae_color, i_hist_opacity, i_hist_labels, current_session_start, i_hist_text_color, true)    
+        if i_hist_mfe_toggle and array.size(a_ses_1_dt) > 0
+            [mfe_bins, mfe_bin_size] = f_create_histogram_bins(a_ses_1_dt)
+            if array.size(mfe_bins) > 0
+                f_draw_histogram_boxes(mfe_bins, mfe_bin_size, mfe_baseline, i_hist_scale_50 ? norm_range * 0.5 : norm_range, 
+                 i_hist_mfe_color, i_hist_opacity, i_hist_labels, current_session_start, i_hist_text_color, false)
+
+// Fixed histogram implementation - Session 2
+if i_hist_2_toggle and ses_2 and not ses_2[1] and i_ses_2_toggle and array.size(a_ses_2_m) >= 3 and array.size(a_ses_2_d) >= 3
+    [mae_baseline, mfe_baseline, norm_range] = f_calculate_baselines(a_ses_2_m, a_ses_2_d, o_2)
+    if not na(mae_baseline) and not na(mfe_baseline) and norm_range > 0
+        current_session_start = time
+        if i_hist_mae_toggle and array.size(a_ses_2_mt) > 0
+            [mae_bins, mae_bin_size] = f_create_histogram_bins(a_ses_2_mt)
+            if array.size(mae_bins) > 0
+                f_draw_histogram_boxes(mae_bins, mae_bin_size, mae_baseline, i_hist_scale_50 ? norm_range * 0.5 : norm_range, 
+                 i_hist_mae_color, i_hist_opacity, i_hist_labels, current_session_start, i_hist_text_color, true)    
+        if i_hist_mfe_toggle and array.size(a_ses_2_dt) > 0
+            [mfe_bins, mfe_bin_size] = f_create_histogram_bins(a_ses_2_dt)
+            if array.size(mfe_bins) > 0
+                f_draw_histogram_boxes(mfe_bins, mfe_bin_size, mfe_baseline, i_hist_scale_50 ? norm_range * 0.5 : norm_range, 
+                 i_hist_mfe_color, i_hist_opacity, i_hist_labels, current_session_start, i_hist_text_color, false)
+
+// Fixed histogram implementation - Session 3
+if i_hist_3_toggle and ses_3 and not ses_3[1] and i_ses_3_toggle and array.size(a_ses_3_m) >= 3 and array.size(a_ses_3_d) >= 3
+    [mae_baseline, mfe_baseline, norm_range] = f_calculate_baselines(a_ses_3_m, a_ses_3_d, o_3)
+    if not na(mae_baseline) and not na(mfe_baseline) and norm_range > 0
+        current_session_start = time
+        if i_hist_mae_toggle and array.size(a_ses_3_mt) > 0
+            [mae_bins, mae_bin_size] = f_create_histogram_bins(a_ses_3_mt)
+            if array.size(mae_bins) > 0
+                f_draw_histogram_boxes(mae_bins, mae_bin_size, mae_baseline, i_hist_scale_50 ? norm_range * 0.5 : norm_range, 
+                 i_hist_mae_color, i_hist_opacity, i_hist_labels, current_session_start, i_hist_text_color, true)    
+        if i_hist_mfe_toggle and array.size(a_ses_3_dt) > 0
+            [mfe_bins, mfe_bin_size] = f_create_histogram_bins(a_ses_3_dt)
+            if array.size(mfe_bins) > 0
+                f_draw_histogram_boxes(mfe_bins, mfe_bin_size, mfe_baseline, i_hist_scale_50 ? norm_range * 0.5 : norm_range, 
+                 i_hist_mfe_color, i_hist_opacity, i_hist_labels, current_session_start, i_hist_text_color, false)
+
+
+
+// Fixed histogram implementation - Session 5
+if i_hist_5_toggle and ses_5 and not ses_5[1] and i_ses_5_toggle and array.size(a_ses_5_m) >= 3 and array.size(a_ses_5_d) >= 3
+    [mae_baseline, mfe_baseline, norm_range] = f_calculate_baselines(a_ses_5_m, a_ses_5_d, o_5)
+    if not na(mae_baseline) and not na(mfe_baseline) and norm_range > 0
+        current_session_start = time
+        if i_hist_mae_toggle and array.size(a_ses_5_mt) > 0
+            [mae_bins, mae_bin_size] = f_create_histogram_bins(a_ses_5_mt)
+            if array.size(mae_bins) > 0
+                f_draw_histogram_boxes(mae_bins, mae_bin_size, mae_baseline, i_hist_scale_50 ? norm_range * 0.5 : norm_range, 
+                 i_hist_mae_color, i_hist_opacity, i_hist_labels, current_session_start, i_hist_text_color, true)    
+        if i_hist_mfe_toggle and array.size(a_ses_5_dt) > 0
+            [mfe_bins, mfe_bin_size] = f_create_histogram_bins(a_ses_5_dt)
+            if array.size(mfe_bins) > 0
+                f_draw_histogram_boxes(mfe_bins, mfe_bin_size, mfe_baseline, i_hist_scale_50 ? norm_range * 0.5 : norm_range, 
+                 i_hist_mfe_color, i_hist_opacity, i_hist_labels, current_session_start, i_hist_text_color, false)
+
+
+
+// Keep array data visible in Data Window, no changes here
+arrayok = array.size(a_ses_1_m) >= 10 ? true : false
+plot(arrayok ? array.get(a_ses_1_m,0) : 1, "m1 0", display=display.data_window)
+plot(arrayok ? array.get(a_ses_1_m,1) : 1, "m1 1", display=display.data_window)
+plot(arrayok ? array.get(a_ses_1_m,2) : 1, "m1 2", display=display.data_window)
+plot(arrayok ? array.get(a_ses_1_m,3) : 1, "m1 3", display=display.data_window)
+plot(arrayok ? array.get(a_ses_1_m,4) : 1, "m1 4", display=display.data_window)
+plot(arrayok ? array.get(a_ses_1_m,5) : 1, "m1 5", display=display.data_window)
+plot(arrayok ? array.get(a_ses_1_m,6) : 1, "m1 6", display=display.data_window)
+plot(arrayok ? array.get(a_ses_1_m,7) : 1, "m1 7", display=display.data_window)
+plot(arrayok ? array.get(a_ses_1_m,8) : 1, "m1 8", display=display.data_window)
+plot(arrayok ? array.get(a_ses_1_m,9) : 1, "m1 9", display=display.data_window)
+plot(array.size(a_ses_1_m), "arry size", display=display.data_window)
+
+
+
+//--------------------------------------------------------------------
+//                     END OF TEST MODE ADDITION
+//--------------------------------------------------------------------
+
+
+// Beginning of the epic HTF LTF code from smitty! //
+//@version=5
+// indicator("HTF/LTF Boxes", overlay=true, dynamic_requests=true, max_bars_back=1000, max_labels_count=200, max_lines_count=500, max_boxes_count=500)
+
+//=============================================================================
+// GLOBAL TIMEZONE & HIGHER TIME FRAME INPUTS (HTF 1)
+//=============================================================================
+var string timezone = "America/New_York"
+var GRP1 = "Hourly Time Frame Settings"
+
+showBoxes = input.bool(true, "Enable Hourly Boxes", inline="boxoptions", group=GRP1)
+// timeframeInput = input.timeframe("60", title="", inline="boxoptions", group=GRP1)
+timeframeInput = "60"
+htfBoxBgColor = input.color(color.new(color.black, 100), "Hourly Box Background", inline="boxoptions1", group=GRP1)
+showBoxBorder = input.bool(true, "Show Border", inline="boxoptions1", group=GRP1)
+dynamicBorder = input.bool(false, "Dynamic Border", inline="boxoptions1", group=GRP1)
+bullBorderColor = input.color(color.new(color.green, 50), "Bull", inline="bordercol", group=GRP1)
+bearBorderColor = input.color(color.new(color.red, 50), "Bear", inline="bordercol", group=GRP1)
+staticBorderColor = input.color(color.new(color.gray, 50), "Static", inline="bordercol", group=GRP1)
+htfBoxBorderStyleInput = input.string("Solid", "", options=["Solid","Dashed","Dotted"], inline="bordercol", group=GRP1)
+htfBoxBorderStyle = htfBoxBorderStyleInput == "Solid" ? line.style_solid : htfBoxBorderStyleInput == "Dashed" ? line.style_dashed : line.style_dotted
+boxBorderWidth = input.int(1, "Width", minval=0, inline="bordercol", group=GRP1)
+
+// HTF Open Line
+showOpenLine = input.bool(true, "Show Hourly Open Line", inline="boxopenline", group=GRP1)
+openLineColor = input.color(color.new(color.green, 50), "", inline="boxopenline", group=GRP1)
+openLineStyleInput = input.string("Dashed", "", options=["Solid","Dashed","Dotted"], inline="boxopenline", group=GRP1)
+openLineStyle = openLineStyleInput == "Solid" ? line.style_solid : openLineStyleInput == "Dashed" ? line.style_dashed : line.style_dotted
+openLineWidth = input.int(1, "Width", minval=0, inline="boxopenline", group=GRP1)
+
+// HTF Close Line
+showCloseLine = input.bool(true, "Show Hourly Close Line", inline="boxcloseline", group=GRP1)
+closeLineColor = input.color(color.new(color.red, 50), "", inline="boxcloseline", group=GRP1)
+closeLineStyleInput = input.string("Dashed", "", options=["Solid","Dashed","Dotted"], inline="boxcloseline", group=GRP1)
+closeLineStyle = closeLineStyleInput == "Solid" ? line.style_solid : closeLineStyleInput == "Dashed" ? line.style_dashed : line.style_dotted
+closeLineWidth = input.int(1, "Width", minval=0, inline="boxcloseline", group=GRP1)
+
+// HTF Midline
+showMidlineInput = input.bool(true, "Show Hourly Midline", inline="boxmidline", group=GRP1)
+midlineColor = input.color(color.new(color.orange, 50), "", inline="boxmidline", group=GRP1)
+midlineStyleInput = input.string("Dashed", "", options=["Solid","Dashed","Dotted"], inline="boxmidline", group=GRP1)
+midlineStyle = midlineStyleInput == "Solid" ? line.style_solid : midlineStyleInput == "Dashed" ? line.style_dashed : line.style_dotted
+midlineWidth = input.int(1, "Width", minval=0, inline="boxmidline", group=GRP1)
+
+//=============================================================================
+// HTF QUARTERLY SETTINGS (HTF 1)
+//=============================================================================
+var GRP2 = "Hourly Quarters Settings"
+globalQuarterly = input.bool(true, "Show Quarterly Divisions", inline="QtrOptions1", group=GRP2)
+onlyShowCurrentBox = input.bool(false, "Only show for current Hourly", inline="QtrOptions1", group=GRP2)
+
+showQuarterLines = input.bool(true, "Show Lines", inline="QtrLineOptions", group=GRP2)
+quarterLineColor = input.color(color.new(color.gray, 50), "", inline="QtrLineOptions", group=GRP2)
+quarterLineStyleInput = input.string("Dotted", "", options=["Solid","Dashed","Dotted"], inline="QtrLineOptions", group=GRP2)
+quarterLineStyle = quarterLineStyleInput == "Solid" ? line.style_solid : quarterLineStyleInput == "Dashed" ? line.style_dashed : line.style_dotted
+quarterLineWidth = input.int(1, "Width", minval=0, inline="QtrLineOptions", group=GRP2)
+
+showQuarterBoxes = input.bool(true, "Show Background", inline="qtrBoxOptions", group=GRP2)
+quarter1BgColor = input.color(color.new(color.gray, 100), "Q1", inline="qtrBoxOptions", group=GRP2)
+quarter2BgColor = input.color(color.new(color.gray, 80), "Q2", inline="qtrBoxOptions", group=GRP2)
+quarter3BgColor = input.color(color.new(color.gray, 100), "Q3", inline="qtrBoxOptions", group=GRP2)
+quarter4BgColor = input.color(color.new(color.gray, 80), "Q4", inline="qtrBoxOptions", group=GRP2)
+
+//=============================================================================
+// LTF BOX & LINES (SESSION-BASED) + OPTION TO APPLY MINUTES
+//=============================================================================
+var string GRP_LTF = "0-5 Box Settings"
+
+// ltfSession = input.session("0900-0905", "LTF Session", group=GRP_LTF, tooltip = "This will draw a box around the opeing minutes of HTF1 and will extend the box to the end of HTF 1 if the box below is selected.  If the 'Apply to All HTF Boxes' is unchecked, then the LTF box will only be drawn on the current HTF.")
+ltfSession = "0900-0905"
+enableLTFBox = input.bool(true, "Enable 0-5 Box", inline="LTFOptions", group=GRP_LTF)
+applySessionToAllHTF = input.bool(true, "Apply to All Hourly Boxes", inline="LTFOptions", group=GRP_LTF)
+extendLTFBox = input.bool(true, "Extend to end of Hourly Box", inline="LTFOptions", group=GRP_LTF)
+
+// LTF box style
+ltfBoxFillColor = input.color(color.new(color.blue, 75), "Background", inline="LTFBoxOptions", group=GRP_LTF)
+ltfBoxBorderColor = input.color(color.new(color.blue, 100), "Border", inline="LTFBoxOptions", group=GRP_LTF)
+ltfBoxBorderStyleInput = input.string("Solid", "", options=["Solid","Dashed","Dotted"], inline="LTFBoxOptions", group=GRP_LTF)
+ltfBoxBorderStyle = ltfBoxBorderStyleInput == "Solid" ? line.style_solid : ltfBoxBorderStyleInput == "Dashed" ? line.style_dashed : line.style_dotted
+ltfBoxBorderWidth = input.int(1, "Width", inline="LTFBoxOptions", group=GRP_LTF)
+
+// LTF lines toggles
+ltfShowOpenLine = input.bool(false, "Show 0-5 Open Line", inline="LTFOpen", group=GRP_LTF)
+ltfOpenLineColor = input.color(color.green, "", inline="LTFOpen", group=GRP_LTF)
+ltfOpenLineStyleInput = input.string("Solid", "", options=["Solid","Dashed","Dotted"], inline="LTFOpen", group=GRP_LTF)
+ltfOpenLineStyle = ltfOpenLineStyleInput == "Solid" ? line.style_solid : ltfOpenLineStyleInput == "Dashed" ? line.style_dashed : line.style_dotted
+ltfOpenLineWidth = input.int(1, "Width", inline="LTFOpen", group=GRP_LTF)
+
+ltfShowCloseLine = input.bool(false, "Show 0-5 Close Line", inline="LTFClose", group=GRP_LTF)
+ltfCloseLineColor = input.color(color.red, "", inline="LTFClose", group=GRP_LTF)
+ltfCloseLineStyleInput = input.string("Solid", "", options=["Solid","Dashed","Dotted"], inline="LTFClose", group=GRP_LTF)
+ltfCloseLineStyle = ltfCloseLineStyleInput == "Solid" ? line.style_solid : ltfCloseLineStyleInput == "Dashed" ? line.style_dashed : line.style_dotted
+ltfCloseLineWidth = input.int(1, "Width", inline="LTFClose", group=GRP_LTF)
+
+ltfShowMidLine = input.bool(true, "Show 0-5 Mid Line", inline="LTFMid", group=GRP_LTF)
+ltfMidLineColor = input.color(color.orange, "", inline="LTFMid", group=GRP_LTF)
+ltfMidLineStyleInput = input.string("Solid", "", options=["Solid","Dashed","Dotted"], inline="LTFMid", group=GRP_LTF)
+ltfMidLineStyle = ltfMidLineStyleInput == "Solid" ? line.style_solid : ltfMidLineStyleInput == "Dashed" ? line.style_dashed : line.style_dotted
+ltfMidLineWidth = input.int(1, "Width", inline="LTFMid", group=GRP_LTF)
+
+// 0.1% Offset Lines (based on 05 box, starting at hourly open, extending 30 min)
+enable01PctOffset = input.bool(true, "Show 0.1% Offset Lines", inline="Offset01", group=GRP_LTF)
+offset01PctLineColor = input.color(color.new(color.blue, 50), "", inline="Offset01", group=GRP_LTF)
+offset01PctLineStyleInput = input.string("Dashed", "", options=["Solid","Dashed","Dotted"], inline="Offset01", group=GRP_LTF)
+offset01PctLineStyle = offset01PctLineStyleInput == "Solid" ? line.style_solid : offset01PctLineStyleInput == "Dashed" ? line.style_dashed : line.style_dotted
+offset01PctLineWidth = input.int(1, "Width", inline="Offset01", group=GRP_LTF)
+
+// 0.05% Offset Lines (based on 05 box, starting at hourly open, extending 30 min)
+enable05PctOffset = input.bool(true, "Show 0.05% Offset Lines", inline="Offset05", group=GRP_LTF)
+offset05PctLineColor = input.color(color.new(color.blue, 50), "", inline="Offset05", group=GRP_LTF)
+offset05PctLineStyleInput = input.string("Dashed", "", options=["Solid","Dashed","Dotted"], inline="Offset05", group=GRP_LTF)
+offset05PctLineStyle = offset05PctLineStyleInput == "Solid" ? line.style_solid : offset05PctLineStyleInput == "Dashed" ? line.style_dashed : line.style_dotted
+offset05PctLineWidth = input.int(1, "Width", inline="Offset05", group=GRP_LTF)
+
+//=============================================================================
+// BREAKOUT TRACKING TABLE SETTINGS
+//=============================================================================
+var string GRP_TRACKING = "Breakout Tracking Table"
+
+enableTrackingTable = input.bool(true, "Enable Tracking Table", inline="TrackingMain", group=GRP_TRACKING)
+trackingTablePosition = input.string("Top Right", "Position", options=["Top Left", "Top Center", "Top Right", "Middle Left", "Middle Center", "Middle Right", "Bottom Left", "Bottom Center", "Bottom Right"], inline="TrackingMain", group=GRP_TRACKING)
+trackingTableSize = input.string("Normal", "Size", options=["Auto", "Tiny", "Small", "Normal", "Large", "Huge"], inline="TrackingSize", group=GRP_TRACKING)
+
+// Table colors
+tableBgColor = input.color(color.new(color.black, 0), "Table Background", inline="TableColors", group=GRP_TRACKING)
+tableTextColor = input.color(color.new(color.white, 0), "Text Color", inline="TableColors", group=GRP_TRACKING)
+tableHeaderColor = input.color(color.new(#1E90FF, 0), "Header Color", inline="TableColors", group=GRP_TRACKING)
+
+// Filtering options
+trackingLookbackMode = input.string("Full Chart", "Lookback Period", options=["Full Chart", "Custom Days"], inline="TrackingLookback", group=GRP_TRACKING)
+trackingLookbackDays = input.int(10, "Days", minval=1, maxval=365, inline="TrackingLookback", group=GRP_TRACKING, tooltip="Only used when 'Custom Days' is selected")
+
+// Hour filter
+trackingHourFilter = input.int(-1, "Filter by Hour (-1 = All)", minval=-1, maxval=23, group=GRP_TRACKING, tooltip="Filter data by specific hour. -1 shows all hours. 0-23 shows only that hour.")
+
+//=============================================================================
+// SECOND HIGHER TIME FRAME INPUTS (HTF 2)
+//=============================================================================
+var GRP1_2 = "3 Hour Time Frame 2 Settings"
+
+showBoxes2 = input.bool(true, "Enable 3 Hr Box", inline="boxoptions2", group=GRP1_2)
+// timeframeInput2 = input.timeframe("180", title="", inline="boxoptions2", group=GRP1_2)
+timeframeInput2 = "180"
+htfBoxBgColor2 = input.color(color.new(color.black, 100), "3 Hr Box Background", inline="boxoptions2_1", group=GRP1_2)
+showBoxBorder2 = input.bool(true, "Show Border", inline="boxoptions2_1", group=GRP1_2)
+dynamicBorder2 = input.bool(false, "Dynamic Border", inline="boxoptions2_1", group=GRP1_2)
+bullBorderColor2 = input.color(color.new(color.green, 50), "Bull", inline="bordercol2", group=GRP1_2)
+bearBorderColor2 = input.color(color.new(color.red, 50), "Bear", inline="bordercol2", group=GRP1_2)
+staticBorderColor2 = input.color(color.new(color.gray, 50), "Static", inline="bordercol2", group=GRP1_2)
+htfBoxBorderStyleInput2 = input.string("Solid", "", options=["Solid","Dashed","Dotted"], inline="bordercol2", group=GRP1_2)
+htfBoxBorderStyle2 = htfBoxBorderStyleInput2 == "Solid" ? line.style_solid : htfBoxBorderStyleInput2 == "Dashed" ? line.style_dashed : line.style_dotted
+boxBorderWidth2 = input.int(1, "Width", minval=0, inline="bordercol2", group=GRP1_2)
+
+// HTF2 Open Line options
+showOpenLine2 = input.bool(true, "Show 3 Hr Open Line", inline="boxopenline2", group=GRP1_2)
+openLineColor2 = input.color(color.new(color.green, 50), "", inline="boxopenline2", group=GRP1_2)
+openLineStyleInput2 = input.string("Dashed", "", options=["Solid","Dashed","Dotted"], inline="boxopenline2", group=GRP1_2)
+openLineStyle2 = openLineStyleInput2 == "Solid" ? line.style_solid : openLineStyleInput2 == "Dashed" ? line.style_dashed : line.style_dotted
+openLineWidth2 = input.int(1, "Width", minval=0, inline="boxopenline2", group=GRP1_2)
+
+// HTF2 Close Line options
+showCloseLine2 = input.bool(true, "Show 3 Hr Close Line", inline="boxcloseline2", group=GRP1_2)
+closeLineColor2 = input.color(color.new(color.red, 50), "", inline="boxcloseline2", group=GRP1_2)
+closeLineStyleInput2 = input.string("Dashed", "", options=["Solid","Dashed","Dotted"], inline="boxcloseline2", group=GRP1_2)
+closeLineStyle2 = closeLineStyleInput2 == "Solid" ? line.style_solid : closeLineStyleInput2 == "Dashed" ? line.style_dashed : line.style_dotted
+closeLineWidth2 = input.int(1, "Width", minval=0, inline="boxcloseline2", group=GRP1_2)
+
+// HTF2 Midline options
+showMidlineInput2 = input.bool(true, "Show 3 Hr Midline", inline="boxmidline2", group=GRP1_2)
+midlineColor2 = input.color(color.new(color.orange, 50), "", inline="boxmidline2", group=GRP1_2)
+midlineStyleInput2 = input.string("Dashed", "", options=["Solid","Dashed","Dotted"], inline="boxmidline2", group=GRP1_2)
+midlineStyle2 = midlineStyleInput2 == "Solid" ? line.style_solid : midlineStyleInput2 == "Dashed" ? line.style_dashed : line.style_dotted
+midlineWidth2 = input.int(1, "Width", minval=0, inline="boxmidline2", group=GRP1_2)
+
+//=============================================================================
+// HTF QUARTERLY SETTINGS (HTF 2)
+//=============================================================================
+var GRP2_2 = "3 Hr Quarterly Settings"
+globalQuarterly2 = input.bool(false, "Show 3 Hr Quarterly Div's", inline="QtrOptions2", group=GRP2_2)
+onlyShowCurrentBox2 = input.bool(false, "Only show for current 3 Hr", inline="QtrOptions2", group=GRP2_2)
+
+showQuarterLines2 = input.bool(false, "Show Lines", inline="QtrLineOptions2", group=GRP2_2)
+quarterLineColor2 = input.color(color.new(color.gray, 50), "", inline="QtrLineOptions2", group=GRP2_2)
+quarterLineStyleInput2 = input.string("Dotted", "", options=["Solid","Dashed","Dotted"], inline="QtrLineOptions2", group=GRP2_2)
+quarterLineStyle2 = quarterLineStyleInput2 == "Solid" ? line.style_solid : quarterLineStyleInput2 == "Dashed" ? line.style_dashed : line.style_dotted
+quarterLineWidth2 = input.int(1, "Width", minval=0, inline="QtrLineOptions2", group=GRP2_2)
+
+showQuarterBoxes2 = input.bool(false, "Show Background", inline="qtrBoxOptions2", group=GRP2_2)
+quarter1BgColor2 = input.color(color.new(color.gray, 100), "Q1", inline="qtrBoxOptions2", group=GRP2_2)
+quarter2BgColor2 = input.color(color.new(color.gray, 80), "Q2", inline="qtrBoxOptions2", group=GRP2_2)
+quarter3BgColor2 = input.color(color.new(color.gray, 100), "Q3", inline="qtrBoxOptions2", group=GRP2_2)
+quarter4BgColor2 = input.color(color.new(color.gray, 80), "Q4", inline="qtrBoxOptions2", group=GRP2_2)
+
+
+//=============================================================================
+// 0930 OPENING BOX INPUTS & SETTINGS
+//=============================================================================
+var GRP0930 = "0930 Opening Box"
+
+enable0930OpeningBox = input.bool(true, "Enable Session Open", inline = 'enable0930', group=GRP0930)
+sessionInput = input.session("0930-1615", "", inline = 'enable0930', group=GRP0930, tooltip="This is the trading session time.  The time in the first box will draw a box around the entire first minute of this time identifiying the 1-minute opening candle. The second time identifies the session closing time.  The opening candle box will extend to this time. Generally this should be 0930-1615 to correspond to market open through settlement.")
+anchorTimeStr = str.substring(sessionInput, 0, 4)
+boxEndTimeStr = str.substring(sessionInput, 5, 9)
+anchorHour = int(str.tonumber(str.substring(anchorTimeStr, 0, 2)))
+anchorMinute = int(str.tonumber(str.substring(anchorTimeStr, 2, 4)))
+endHour = int(str.tonumber(str.substring(boxEndTimeStr, 0, 2)))
+endMinute = int(str.tonumber(str.substring(boxEndTimeStr, 2, 4)))
+showBox = input.bool(true, "Show Session Box", inline="openingbox", group=GRP0930)
+boxBgColor = input.color(color.new(color.yellow, 85), "", inline="openingbox", group=GRP0930)
+showBoxOutline = input.bool(false, "Show Box Outline", inline="openingboxborder", group=GRP0930)
+boxBorderColor = input.color(color.gray, "", inline="openingboxborder", group=GRP0930)
+boxBorderWidth0930 = input.int(1, "Width", minval=0, inline="openingboxborder", group=GRP0930)
+boxOffsetInput = input.int(40, "Box Extension (1-min bars)", minval=0, group=GRP0930, tooltip="Number of candles to extend the box from the anchor candle")
+show0930OpenLine = input.bool(false, "Show Open Line", inline="openline", group=GRP0930)
+openLineColor0930 = input.color(color.green, "", inline="openline", group=GRP0930)
+show0930CloseLine = input.bool(false, "Show Close Line", inline="openline", group=GRP0930)
+closeLineColor0930 = input.color(color.red, "", inline="openline", group=GRP0930)
+recolorCandle0930 = input.bool(true, "Recolor Opening Candle", inline="label", group=GRP0930)
+candleColor0930 = input.color(color.yellow, "", inline="label", group=GRP0930)
+lineStyleInput0930 = input.string("Solid", "Lines Style", options=["Solid", "Dashed", "Dotted"], inline="openline", group=GRP0930)
+lineStyle0930 = lineStyleInput0930 == "Solid" ? line.style_solid : lineStyleInput0930 == "Dashed" ? line.style_dashed : line.style_dotted
+lineWidth0930 = input.int(1, "Lines Thickness", minval=1, inline="openline", group=GRP0930)
+showLabel0930 = input.bool(true, "Show Label", inline="label", group=GRP0930)
+labelTextColor0930 = input.color(color.gray, "", inline="label", group=GRP0930)
+
+var float tfHigh = na
+var float tfLow = na
+var float tfHigh2 = na
+var float tfLow2 = na
+
+// Global function to retrieve 1-min anchor candle data
+f_anchorCandleData(expr) =>
+    request.security(syminfo.tickerid, "1", (hour(time, timezone) == anchorHour and minute(time, timezone) == anchorMinute) ? expr : na, lookahead=barmerge.lookahead_on)
+
+// Global variable for storing the 0930 box time
+var int openingBoxTime = na
+
+//=============================================================================
+// REQUEST SECURITY DATA FOR THE SELECTED HTF (HTF 1)
+//=============================================================================
+[tfOpen, tfClose, tfTime] = request.security(syminfo.tickerid, timeframeInput, [open, close, time], lookahead=barmerge.lookahead_on)
+
+//tfHigh = request.security(syminfo.tickerid, timeframeInput, high, lookahead=barmerge.lookahead_on)
+//tfLow = request.security(syminfo.tickerid, timeframeInput, low, lookahead=barmerge.lookahead_on)
+
+duration = timeframe.in_seconds(timeframeInput) * 1000
+
+//=============================================================================
+// REQUEST SECURITY DATA FOR THE SECOND HTF (HTF 2)
+//=============================================================================
+[tfOpen2, tfClose2, tfTime2] = request.security(syminfo.tickerid, timeframeInput2, [open, close, time], lookahead=barmerge.lookahead_on)
+//[tfHigh2, tfLow2, tfOpen2, tfClose2, tfTime2] = request.security(syminfo.tickerid, timeframeInput2, [high, low, open, close, time], lookahead=barmerge.lookahead_on)
+duration2 = timeframe.in_seconds(timeframeInput2) * 1000
+
+//=============================================================================
+// DETERMINE ACTIVE BOX & QUARTERLY CONDITION (HTF 1)
+//=============================================================================
+isNewPeriod = ta.change(tfTime)? true:false
+activeBox = bar_index == ta.highest(bar_index, 5000)
+var int activeTfTime = na
+quarterCondition = not onlyShowCurrentBox or activeBox
+
+tfHigh:=barstate.isfirst? high:isNewPeriod !=0? high:math.max(high,tfHigh)
+tfLow:=barstate.isfirst? low:isNewPeriod !=0? low:math.min(low,tfLow)
+
+//=============================================================================
+//DETERMINE ACTIVE BOX & QUARTERLY CONDITION (HTF 2)
+//=============================================================================
+isNewPeriod2 = ta.change(tfTime2)? true:false
+activeBox2 = bar_index == ta.highest(bar_index, 5000)
+var int activeTfTime2 = na
+secondQuarterCondition = not onlyShowCurrentBox2 or activeBox2
+
+tfHigh2:=barstate.isfirst? high:isNewPeriod2 !=0? high:math.max(high,tfHigh2)
+tfLow2:=barstate.isfirst? low:isNewPeriod2 !=0? low:math.min(low,tfLow2)
+
+//=============================================================================
+//PERSISTENT ARRAYS & VARIABLES (HTF 1)
+//=============================================================================
+var box[] allBoxes = array.new<box>()
+var box[] quarterBox1 = array.new<box>()
+var box[] quarterBox2 = array.new<box>()
+var box[] quarterBox3 = array.new<box>()
+var box[] quarterBox4 = array.new<box>()
+var line[] allVerticals = array.new<line>()
+var line[] allMidlines = array.new<line>()
+var line[] allOpenLines = array.new<line>()
+var line[] allCloseLines = array.new<line>()
+
+var box extendedLTFBox = na
+var bool extendedTracking = false
+var float extendedHigh = na
+var float extendedLow = na
+var float extendedOpen = na
+var float extendedClose = na
+
+var box localLTFBox = na
+var bool localTracking = false
+var float localHigh = na
+var float localLow = na
+var float localOpen = na
+var float localClose = na
+
+var line ltfOpenLine = na
+var line ltfCloseLine = na
+var line ltfMidLine = na
+
+// Variables for 05 box offset lines
+var line[] offset01PctHighLines = array.new<line>()
+var line[] offset01PctLowLines = array.new<line>()
+var line[] offset05PctHighLines = array.new<line>()
+var line[] offset05PctLowLines = array.new<line>()
+var label[] offset01PctHighLabels = array.new<label>()
+var label[] offset01PctLowLabels = array.new<label>()
+var label[] offset05PctHighLabels = array.new<label>()
+var label[] offset05PctLowLabels = array.new<label>()
+
+// Track previous extendedTracking state to detect completion
+var bool prevExtendedTracking = false
+// Store completed 05 box data
+var float completed05High = na
+var float completed05Low = na
+var int completed05StartTime = na
+
+//=============================================================================
+// BREAKOUT TRACKING VARIABLES & ARRAYS
+//=============================================================================
+// Current hour tracking state
+var int currentHourStartTime = na
+var string breakoutDirection = "NONE"  // "UP", "DOWN", "NONE"
+var bool breakoutInQ1 = false
+var int breakoutTime = na
+
+// Q1 line hit tracking
+var bool q1_touched_05pct = false
+var bool q1_closed_beyond_05pct = false
+var bool q1_touched_1pct = false
+var bool q1_closed_beyond_1pct = false
+var bool q1_no_line_hit = false
+
+// Full hour line hit tracking
+var bool hour_touched_05pct = false
+var bool hour_closed_beyond_05pct = false
+var bool hour_touched_1pct = false
+var bool hour_closed_beyond_1pct = false
+
+// Reversal tracking (4 types)
+var bool reversal_type_a = false  // Broke through opposite side of 05 box
+var bool reversal_type_b = false  // Closed on opposite side of 05 box
+var bool reversal_type_c = false  // Hit opposite side's 0.05% or 0.1% lines
+var bool reversal_type_d = false  // Hourly candle closed opposite to breakout direction
+
+// Continuation tracking
+var bool continued_direction = false
+
+// Hour-end close position tracking (for conditional Q1 analysis)
+var bool hour_end_closed_past_05box = false
+var bool hour_end_closed_past_05pct = false
+var bool hour_end_closed_past_1pct = false
+
+// Historical data arrays (max 5000 hours)
+var int[] hist_hour_start_times = array.new<int>()
+var string[] hist_breakout_directions = array.new<string>()
+var bool[] hist_breakout_in_q1 = array.new<bool>()
+
+// Q1 metrics arrays
+var bool[] hist_q1_touched_05pct = array.new<bool>()
+var bool[] hist_q1_closed_beyond_05pct = array.new<bool>()
+var bool[] hist_q1_touched_1pct = array.new<bool>()
+var bool[] hist_q1_closed_beyond_1pct = array.new<bool>()
+var bool[] hist_q1_no_line_hit = array.new<bool>()
+
+// Full hour metrics arrays
+var bool[] hist_hour_touched_05pct = array.new<bool>()
+var bool[] hist_hour_closed_beyond_05pct = array.new<bool>()
+var bool[] hist_hour_touched_1pct = array.new<bool>()
+var bool[] hist_hour_closed_beyond_1pct = array.new<bool>()
+
+// Reversal arrays
+var bool[] hist_reversal_type_a = array.new<bool>()
+var bool[] hist_reversal_type_b = array.new<bool>()
+var bool[] hist_reversal_type_c = array.new<bool>()
+var bool[] hist_reversal_type_d = array.new<bool>()
+
+// Continuation arrays
+var bool[] hist_continued_direction = array.new<bool>()
+
+// Hour-end close position arrays (for conditional Q1 analysis)
+var bool[] hist_hour_end_closed_past_05box = array.new<bool>()
+var bool[] hist_hour_end_closed_past_05pct = array.new<bool>()
+var bool[] hist_hour_end_closed_past_1pct = array.new<bool>()
+
+// Helper variables for tracking
+var float current_05_high = na
+var float current_05_low = na
+var float current_05pct_high = na
+var float current_05pct_low = na
+var float current_1pct_high = na
+var float current_1pct_low = na
+
+// Debug counters
+var int debug_total_bars = 0
+var int debug_new_period_count = 0
+var int debug_tracking_init_count = 0
+var int debug_data_saved_count = 0
+var int debug_05box_complete_count = 0
+
+//=============================================================================
+// PERSISTENT ARRAYS & VARIABLES (HTF 2)
+//=============================================================================
+var box[] allBoxes2 = array.new<box>()
+var box[] quarterBox1_2 = array.new<box>()
+var box[] quarterBox2_2 = array.new<box>()
+var box[] quarterBox3_2 = array.new<box>()
+var box[] quarterBox4_2 = array.new<box>()
+var line[] allVerticals2 = array.new<line>()
+var line[] allMidlines2 = array.new<line>()
+var line[] allOpenLines2 = array.new<line>()
+var line[] allCloseLines2 = array.new<line>()
+
+//=============================================================================
+// CREATION SECTION (NEW HTF BAR for HTF 1)
+//=============================================================================
+if isNewPeriod
+    if array.size(allBoxes) > 0
+        lastBox = array.get(allBoxes, array.size(allBoxes) - 1)
+        box.set_right(lastBox, tfTime)
+    if array.size(allMidlines) > 0
+        lastMidline = array.get(allMidlines, array.size(allMidlines) - 1)
+        line.set_x2(lastMidline, tfTime)
+    if showBoxes
+        borderCol = showBoxBorder ? (dynamicBorder ? (tfClose >= tfOpen ? bullBorderColor : bearBorderColor) : staticBorderColor) : color.new(staticBorderColor, 100)
+        newBox = box.new(tfTime, tfHigh, tfTime + duration, tfLow, border_color=borderCol, border_width=(showBoxBorder ? boxBorderWidth : 0), border_style=htfBoxBorderStyle, bgcolor=htfBoxBgColor, xloc=xloc.bar_time)
+        array.push(allBoxes, newBox)
+        if array.size(allBoxes) > 200
+            oldBox = array.shift(allBoxes)
+            box.delete(oldBox)
+
+        if activeBox
+            activeTfTime := tfTime
+        if globalQuarterly and showQuarterBoxes and quarterCondition
+            q1 = box.new(tfTime, tfHigh, tfTime + duration/4, tfLow, border_width=0, bgcolor=quarter1BgColor, xloc=xloc.bar_time)
+            q2 = box.new(tfTime + duration/4, tfHigh, tfTime + duration/2, tfLow, border_width=0, bgcolor=quarter2BgColor, xloc=xloc.bar_time)
+            q3 = box.new(tfTime + duration/2, tfHigh, tfTime + 3*duration/4, tfLow, border_width=0, bgcolor=quarter3BgColor, xloc=xloc.bar_time)
+            q4 = box.new(tfTime + 3*duration/4, tfHigh, tfTime + duration, tfLow, border_width=0, bgcolor=quarter4BgColor, xloc=xloc.bar_time)
+            array.push(quarterBox1, q1)
+            array.push(quarterBox2, q2)
+            array.push(quarterBox3, q3)
+            array.push(quarterBox4, q4)
+        if globalQuarterly and showQuarterLines and quarterCondition
+            vLine1 = line.new(tfTime + duration/4, tfHigh, tfTime + duration/4, tfLow, color=quarterLineColor, width=quarterLineWidth, style=quarterLineStyle, xloc=xloc.bar_time)
+            vLine2 = line.new(tfTime + duration/2, tfHigh, tfTime + duration/2, tfLow, color=quarterLineColor, width=quarterLineWidth, style=quarterLineStyle, xloc=xloc.bar_time)
+            vLine3 = line.new(tfTime + 3*duration/4, tfHigh, tfTime + 3*duration/4, tfLow, color=quarterLineColor, width=quarterLineWidth, style=quarterLineStyle, xloc=xloc.bar_time)
+            array.push(allVerticals, vLine1)
+            array.push(allVerticals, vLine2)
+            array.push(allVerticals, vLine3)
+            while array.size(allVerticals) > 500  // since 3 lines per bar
+                line.delete(array.shift(allVerticals))
+        if showBoxes and showMidlineInput
+            midPrice = (tfHigh + tfLow) / 2
+            newMidline = line.new(tfTime, midPrice, tfTime + duration, midPrice, color=midlineColor, width=midlineWidth, style=midlineStyle, xloc=xloc.bar_time)
+            array.push(allMidlines, newMidline)
+            if array.size(allMidlines) > 150
+                oldLine = array.shift(allMidlines)
+                line.delete(oldLine)
+        if showBoxes and showOpenLine
+            newOpenLine = line.new(tfTime, tfOpen, tfTime + duration, tfOpen, color=openLineColor, width=openLineWidth, style=openLineStyle, xloc=xloc.bar_time)            
+            array.push(allOpenLines, newOpenLine)
+            if array.size(allOpenLines) > 150
+                oldLine = array.shift(allOpenLines)
+                line.delete(oldLine)
+        if showBoxes and showCloseLine
+            newCloseLine = line.new(tfTime, tfClose, tfTime + duration, tfClose, color=closeLineColor, width=closeLineWidth, style=closeLineStyle, xloc=xloc.bar_time)
+            array.push(allCloseLines, newCloseLine)
+            if array.size(allCloseLines) > 150
+                oldLine = array.shift(allCloseLines)
+                line.delete(oldLine)
+    extendedTracking := false
+    extendedLTFBox := na
+    extendedHigh := na
+    extendedLow := na
+    extendedOpen := na
+    extendedClose := na
+    localTracking := false
+    localLTFBox := na
+    localHigh := na
+    localLow := na
+    localOpen := na
+    localClose := na
+    ltfOpenLine := na
+    ltfCloseLine := na
+    ltfMidLine := na
+
+//=============================================================================
+// CREATION SECTION (NEW HTF BAR for HTF 2)
+//=============================================================================
+if isNewPeriod2
+    if array.size(allBoxes2) > 0
+        lastBox2 = array.get(allBoxes2, array.size(allBoxes2) - 1)
+        box.set_right(lastBox2, tfTime2)
+    if array.size(allMidlines2) > 0
+        lastMidline2 = array.get(allMidlines2, array.size(allMidlines2) - 1)
+        line.set_x2(lastMidline2, tfTime2)
+    if showBoxes2
+        borderCol2 = showBoxBorder2 ? (dynamicBorder2 ? (tfClose2 >= tfOpen2 ? bullBorderColor2 : bearBorderColor2) : staticBorderColor2) : color.new(staticBorderColor2, 100)
+        newBox2 = box.new(tfTime2, tfHigh2, tfTime2 + duration2, tfLow2, border_color=borderCol2, border_width=(showBoxBorder2 ? boxBorderWidth2 : 0), border_style=htfBoxBorderStyle2, bgcolor=htfBoxBgColor2, xloc=xloc.bar_time)
+        array.push(allBoxes2, newBox2)
+        if array.size(allBoxes2) > 200
+            oldBox2 = array.shift(allBoxes2)
+            box.delete(oldBox2)
+
+        if activeBox2
+            activeTfTime2 := tfTime2
+        if globalQuarterly2 and showQuarterBoxes2 and secondQuarterCondition
+            q1_2 = box.new(tfTime2, tfHigh2, tfTime2 + duration2/4, tfLow2, border_width=0, bgcolor=quarter1BgColor2, xloc=xloc.bar_time)
+            q2_2 = box.new(tfTime2 + duration2/4, tfHigh2, tfTime2 + duration2/2, tfLow2, border_width=0, bgcolor=quarter2BgColor2, xloc=xloc.bar_time)
+            q3_2 = box.new(tfTime2 + duration2/2, tfHigh2, tfTime2 + 3*duration2/4, tfLow2, border_width=0, bgcolor=quarter3BgColor2, xloc=xloc.bar_time)
+            q4_2 = box.new(tfTime2 + 3*duration2/4, tfHigh2, tfTime2 + duration2, tfLow2, border_width=0, bgcolor=quarter4BgColor2, xloc=xloc.bar_time)
+            array.push(quarterBox1_2, q1_2)
+            array.push(quarterBox2_2, q2_2)
+            array.push(quarterBox3_2, q3_2)
+            array.push(quarterBox4_2, q4_2)
+            if array.size(quarterBox1) > 150
+                box.delete(array.shift(quarterBox1))
+            if array.size(quarterBox2) > 150
+                box.delete(array.shift(quarterBox2))
+            if array.size(quarterBox3) > 150
+                box.delete(array.shift(quarterBox3))
+            if array.size(quarterBox4) > 150
+                box.delete(array.shift(quarterBox4))
+        if globalQuarterly2 and showQuarterLines2 and secondQuarterCondition
+            vLine1_2 = line.new(tfTime2 + duration2/4, tfHigh2, tfTime2 + duration2/4, tfLow2, color=quarterLineColor2, width=quarterLineWidth2, style=quarterLineStyle2, xloc=xloc.bar_time)
+            vLine2_2 = line.new(tfTime2 + duration2/2, tfHigh2, tfTime2 + duration2/2, tfLow2, color=quarterLineColor2, width=quarterLineWidth2, style=quarterLineStyle2, xloc=xloc.bar_time)
+            vLine3_2 = line.new(tfTime2 + 3*duration2/4, tfHigh2, tfTime2 + 3*duration2/4, tfLow2, color=quarterLineColor2, width=quarterLineWidth2, style=quarterLineStyle2, xloc=xloc.bar_time)
+            array.push(allVerticals2, vLine1_2)
+            array.push(allVerticals2, vLine2_2)
+            array.push(allVerticals2, vLine3_2)
+            while array.size(allVerticals2) > 500
+                line.delete(array.shift(allVerticals2))
+        if showBoxes2 and showMidlineInput2
+            midPrice2_calc = (tfHigh2 + tfLow2) / 2
+            newMidline2 = line.new(tfTime2, midPrice2_calc, tfTime2 + duration2, midPrice2_calc, color=midlineColor2, width=midlineWidth2, style=midlineStyle2, xloc=xloc.bar_time)
+            array.push(allMidlines2, newMidline2)
+            if array.size(allMidlines2) > 50
+                oldLine2 = array.shift(allMidlines2)
+                line.delete(oldLine2)
+        if showBoxes2 and showOpenLine2
+            newOpenLine2 = line.new(tfTime2, tfOpen2, tfTime2 + duration2, tfOpen2, color=openLineColor2, width=openLineWidth2, style=openLineStyle2, xloc=xloc.bar_time)
+            array.push(allOpenLines2, newOpenLine2)
+            if array.size(allOpenLines2) > 50
+                oldLine2 = array.shift(allOpenLines2)
+                line.delete(oldLine2)
+        if showBoxes2 and showCloseLine2
+            newCloseLine2 = line.new(tfTime2, tfClose2, tfTime2 + duration2, tfClose2, color=closeLineColor2, width=closeLineWidth2, style=closeLineStyle2, xloc=xloc.bar_time)
+            array.push(allCloseLines2, newCloseLine2)
+            if array.size(allCloseLines2) > 50
+                oldLine2 = array.shift(allCloseLines2)
+                line.delete(oldLine2)
+
+//=============================================================================
+// UPDATE SECTION (EACH BAR for HTF 1)
+//=============================================================================
+if array.size(allBoxes) > 0
+    currentEndTime = tfTime + duration
+    currentBox = array.get(allBoxes, array.size(allBoxes) - 1)
+
+    if showBoxes and showBoxBorder and dynamicBorder
+        borderCol = tfClose >= tfOpen ? bullBorderColor : bearBorderColor
+        box.set_border_color(currentBox, borderCol)
+
+    box.set_right(currentBox, currentEndTime)
+    box.set_top(currentBox, tfHigh)
+    box.set_bottom(currentBox, tfLow)
+    if globalQuarterly and showQuarterBoxes and quarterCondition and array.size(quarterBox1) > 0 and array.size(quarterBox2) > 0 and array.size(quarterBox3) > 0 and array.size(quarterBox4) > 0
+        q1 = array.get(quarterBox1, array.size(quarterBox1) - 1)
+        box.set_right(q1, tfTime + duration/4)
+        box.set_top(q1, tfHigh)
+        box.set_bottom(q1, tfLow)
+        q2 = array.get(quarterBox2, array.size(quarterBox2) - 1)
+        box.set_left(q2, tfTime + duration/4)
+        box.set_right(q2, tfTime + duration/2)
+        box.set_top(q2, tfHigh)
+        box.set_bottom(q2, tfLow)
+        q3 = array.get(quarterBox3, array.size(quarterBox3) - 1)
+        box.set_left(q3, tfTime + duration/2)
+        box.set_right(q3, tfTime + 3*duration/4)
+        box.set_top(q3, tfHigh)
+        box.set_bottom(q3, tfLow)
+        q4 = array.get(quarterBox4, array.size(quarterBox4) - 1)
+        box.set_left(q4, tfTime + 3*duration/4)
+        box.set_right(q4, tfTime + duration)
+        box.set_top(q4, tfHigh)
+        box.set_bottom(q4, tfLow)
+    if globalQuarterly and showQuarterLines and quarterCondition and array.size(allVerticals) >= 3
+        vLine1 = array.get(allVerticals, array.size(allVerticals) - 3)
+        vLine2 = array.get(allVerticals, array.size(allVerticals) - 2)
+        vLine3 = array.get(allVerticals, array.size(allVerticals) - 1)
+        line.set_x1(vLine1, tfTime + duration/4)
+        line.set_x2(vLine1, tfTime + duration/4)
+        line.set_y1(vLine1, tfHigh)
+        line.set_y2(vLine1, tfLow)
+        line.set_x1(vLine2, tfTime + duration/2)
+        line.set_x2(vLine2, tfTime + duration/2)
+        line.set_y1(vLine2, tfHigh)
+        line.set_y2(vLine2, tfLow)
+        line.set_x1(vLine3, tfTime + 3*duration/4)
+        line.set_x2(vLine3, tfTime + 3*duration/4)
+        line.set_y1(vLine3, tfHigh)
+        line.set_y2(vLine3, tfLow)
+    if array.size(allMidlines) > 0
+        currentMidline = array.get(allMidlines, array.size(allMidlines) - 1)
+        line.set_x2(currentMidline, currentEndTime)
+        midPrice2 = (tfHigh + tfLow) / 2
+        line.set_y1(currentMidline, midPrice2)
+        line.set_y2(currentMidline, midPrice2)
+    if array.size(allOpenLines) > 0
+        currentOpenLine = array.get(allOpenLines, array.size(allOpenLines) - 1)
+        line.set_x2(currentOpenLine, currentEndTime)
+        line.set_y1(currentOpenLine, tfOpen)
+        line.set_y2(currentOpenLine, tfOpen)
+    if array.size(allCloseLines) > 0
+        currentCloseLine = array.get(allCloseLines, array.size(allCloseLines) - 1)
+        line.set_x2(currentCloseLine, currentEndTime)
+        line.set_y1(currentCloseLine, tfClose)
+        line.set_y2(currentCloseLine, tfClose)
+
+//=============================================================================
+// UPDATE SECTION (EACH BAR for HTF 2)
+//=============================================================================
+if array.size(allBoxes2) > 0
+    currentEndTime2 = tfTime2 + duration2
+    currentBox2 = array.get(allBoxes2, array.size(allBoxes2) - 1)
+    
+    if showBoxes2 and showBoxBorder2 and dynamicBorder2
+        borderCol2 = tfClose2 >= tfOpen2 ? bullBorderColor2 : bearBorderColor2
+        box.set_border_color(currentBox2, borderCol2)
+
+    box.set_right(currentBox2, currentEndTime2)
+    box.set_top(currentBox2, tfHigh2)
+    box.set_bottom(currentBox2, tfLow2)
+    if globalQuarterly2 and showQuarterBoxes2 and secondQuarterCondition and array.size(quarterBox1_2) > 0 and array.size(quarterBox2_2) > 0 and array.size(quarterBox3_2) > 0 and array.size(quarterBox4_2) > 0
+        q1_2 = array.get(quarterBox1_2, array.size(quarterBox1_2) - 1)
+        box.set_right(q1_2, tfTime2 + duration2/4)
+        box.set_top(q1_2, tfHigh2)
+        box.set_bottom(q1_2, tfLow2)
+        q2_2 = array.get(quarterBox2_2, array.size(quarterBox2_2) - 1)
+        box.set_left(q2_2, tfTime2 + duration2/4)
+        box.set_right(q2_2, tfTime2 + duration2/2)
+        box.set_top(q2_2, tfHigh2)
+        box.set_bottom(q2_2, tfLow2)
+        q3_2 = array.get(quarterBox3_2, array.size(quarterBox3_2) - 1)
+        box.set_left(q3_2, tfTime2 + duration2/2)
+        box.set_right(q3_2, tfTime2 + 3*duration2/4)
+        box.set_top(q3_2, tfHigh2)
+        box.set_bottom(q3_2, tfLow2)
+        q4_2 = array.get(quarterBox4_2, array.size(quarterBox4_2) - 1)
+        box.set_left(q4_2, tfTime2 + 3*duration2/4)
+        box.set_right(q4_2, tfTime2 + duration2)
+        box.set_top(q4_2, tfHigh2)
+        box.set_bottom(q4_2, tfLow2)
+    if globalQuarterly2 and showQuarterLines2 and secondQuarterCondition and array.size(allVerticals2) >= 3
+        vLine1_2 = array.get(allVerticals2, array.size(allVerticals2) - 3)
+        vLine2_2 = array.get(allVerticals2, array.size(allVerticals2) - 2)
+        vLine3_2 = array.get(allVerticals2, array.size(allVerticals2) - 1)
+        line.set_x1(vLine1_2, tfTime2 + duration2/4)
+        line.set_x2(vLine1_2, tfTime2 + duration2/4)
+        line.set_y1(vLine1_2, tfHigh2)
+        line.set_y2(vLine1_2, tfLow2)
+        line.set_x1(vLine2_2, tfTime2 + duration2/2)
+        line.set_x2(vLine2_2, tfTime2 + duration2/2)
+        line.set_y1(vLine2_2, tfHigh2)
+        line.set_y2(vLine2_2, tfLow2)
+        line.set_x1(vLine3_2, tfTime2 + 3*duration2/4)
+        line.set_x2(vLine3_2, tfTime2 + 3*duration2/4)
+        line.set_y1(vLine3_2, tfHigh2)
+        line.set_y2(vLine3_2, tfLow2)
+    if array.size(allMidlines2) > 0
+        currentMidline2 = array.get(allMidlines2, array.size(allMidlines2) - 1)
+        line.set_x2(currentMidline2, currentEndTime2)
+        midPrice2_2 = (tfHigh2 + tfLow2) / 2
+        line.set_y1(currentMidline2, midPrice2_2)
+        line.set_y2(currentMidline2, midPrice2_2)
+    if array.size(allOpenLines2) > 0
+        currentOpenLine2 = array.get(allOpenLines2, array.size(allOpenLines2) - 1)
+        line.set_x2(currentOpenLine2, currentEndTime2)
+        line.set_y1(currentOpenLine2, tfOpen2)
+        line.set_y2(currentOpenLine2, tfOpen2)
+    if array.size(allCloseLines2) > 0
+        currentCloseLine2 = array.get(allCloseLines2, array.size(allCloseLines2) - 1)
+        line.set_x2(currentCloseLine2, currentEndTime2)
+        line.set_y1(currentCloseLine2, tfClose2)
+        line.set_y2(currentCloseLine2, tfClose2)
+
+//=============================================================================
+// LTF BOX & LINE LOGIC (SESSION-BASED)
+//=============================================================================
+if showBoxes and enableLTFBox
+    startHour = int(str.tonumber(str.substring(ltfSession, 0, 2)))
+    startMinute = int(str.tonumber(str.substring(ltfSession, 2, 4)))
+    endHour = int(str.tonumber(str.substring(ltfSession, 5, 7)))
+    endMinute = int(str.tonumber(str.substring(ltfSession, 7, 9)))
+    float startMs = na
+    float endMs = na
+    if applySessionToAllHTF
+        startMs := tfTime + (startMinute * 60000)
+        endMs := tfTime + (endMinute * 60000)
+    else
+        startMs := timestamp(timezone, year(time), month(time), dayofmonth(time), startHour, startMinute)
+        endMs := timestamp(timezone, year(time), month(time), dayofmonth(time), endHour, endMinute)
+    if extendLTFBox
+        inWindow = time >= startMs and time < endMs
+        if inWindow
+            if not extendedTracking
+                extendedTracking := true
+                extendedHigh := high
+                extendedLow := low
+                extendedOpen := open
+                extendedClose := close
+                extendedLTFBox := box.new(time, extendedHigh, tfTime + duration, extendedLow, border_color=ltfBoxBorderColor, border_width=ltfBoxBorderWidth, border_style=ltfBoxBorderStyle, bgcolor=ltfBoxFillColor, xloc=xloc.bar_time)
+            else
+                extendedHigh := math.max(extendedHigh, high)
+                extendedLow := math.min(extendedLow, low)
+                extendedClose := close
+                if not na(extendedLTFBox)
+                    box.set_top(extendedLTFBox, extendedHigh)
+                    box.set_bottom(extendedLTFBox, extendedLow)
+        else
+            if extendedTracking
+                extendedTracking := false
+                if not na(extendedLTFBox)
+                    box.set_left(extendedLTFBox, int(startMs))
+        inLocalRange = time >= startMs and time < endMs
+        if inLocalRange
+            if not localTracking
+                localTracking := true
+                localHigh := high
+                localLow := low
+                localOpen := open
+                localClose := close
+                localLTFBox := box.new(time, localHigh, time, localLow, border_color=ltfBoxBorderColor, border_width=ltfBoxBorderWidth, border_style=ltfBoxBorderStyle, bgcolor=ltfBoxFillColor, xloc=xloc.bar_time)
+            else
+                localHigh := math.max(localHigh, high)
+                localLow := math.min(localLow, low)
+                localClose := close
+                if not na(localLTFBox)
+                    box.set_top(localLTFBox, localHigh)
+                    box.set_bottom(localLTFBox, localLow)
+                    if time > endMs
+                        box.set_right(localLTFBox, int(endMs))
+                    else
+                        box.set_right(localLTFBox, time)
+        else
+            if localTracking
+                localTracking := false
+                if not na(localLTFBox)
+                    box.set_left(localLTFBox, int(startMs))
+        if extendedTracking
+            if ltfShowOpenLine
+                if na(ltfOpenLine)
+                    ltfOpenLine := line.new(int(startMs), extendedOpen, tfTime + duration, extendedOpen, color=ltfOpenLineColor, width=ltfOpenLineWidth, style=ltfOpenLineStyle, xloc=xloc.bar_time)
+                else
+                    line.set_x1(ltfOpenLine, int(startMs))
+                    line.set_x2(ltfOpenLine, tfTime + duration)
+                    line.set_y1(ltfOpenLine, extendedOpen)
+                    line.set_y2(ltfOpenLine, extendedOpen)
+            if ltfShowCloseLine
+                if na(ltfCloseLine)
+                    ltfCloseLine := line.new(int(startMs), extendedClose, tfTime + duration, extendedClose, color=ltfCloseLineColor, width=ltfCloseLineWidth, style=ltfCloseLineStyle, xloc=xloc.bar_time)
+                else
+                    line.set_x1(ltfCloseLine, int(startMs))
+                    line.set_x2(ltfCloseLine, tfTime + duration)
+                    line.set_y1(ltfCloseLine, extendedClose)
+                    line.set_y2(ltfCloseLine, extendedClose)
+            if ltfShowMidLine
+                midPriceExt = (extendedHigh + extendedLow) / 2
+                if na(ltfMidLine)
+                    ltfMidLine := line.new(int(startMs), midPriceExt, tfTime + duration, midPriceExt, color=ltfMidLineColor, width=ltfMidLineWidth, style=ltfMidLineStyle, xloc=xloc.bar_time)
+                else
+                    line.set_x1(ltfMidLine, int(startMs))
+                    line.set_x2(ltfMidLine, tfTime + duration)
+                    line.set_y1(ltfMidLine, midPriceExt)
+                    line.set_y2(ltfMidLine, midPriceExt)
+    else
+        inWindow = time >= startMs and time < endMs
+        if inWindow
+            if not localTracking
+                localTracking := true
+                localHigh := high
+                localLow := low
+                localOpen := open
+                localClose := close
+                localLTFBox := box.new(time, localHigh, time, localLow, border_color=ltfBoxBorderColor, border_width=ltfBoxBorderWidth, border_style=ltfBoxBorderStyle, bgcolor=ltfBoxFillColor, xloc=xloc.bar_time)
+            else
+                localHigh := math.max(localHigh, high)
+                localLow := math.min(localLow, low)
+                localClose := close
+                if not na(localLTFBox)
+                    box.set_top(localLTFBox, localHigh)
+                    box.set_bottom(localLTFBox, localLow)
+                    currentRight = time > endMs ? int(endMs) : time
+                    box.set_right(localLTFBox, currentRight)
+        else
+            if localTracking
+                localTracking := false
+                if not na(localLTFBox)
+                    box.set_left(localLTFBox, int(startMs))
+        if localTracking
+            currentRight = time > endMs ? int(endMs) : time
+            if ltfShowOpenLine
+                if na(ltfOpenLine)
+                    ltfOpenLine := line.new(int(startMs), localOpen, currentRight, localOpen, color=ltfOpenLineColor, width=ltfOpenLineWidth, style=ltfOpenLineStyle, xloc=xloc.bar_time)
+                else
+                    line.set_x1(ltfOpenLine, int(startMs))
+                    line.set_x2(ltfOpenLine, currentRight)
+                    line.set_y1(ltfOpenLine, localOpen)
+                    line.set_y2(ltfOpenLine, localOpen)
+            if ltfShowCloseLine
+                if na(ltfCloseLine)
+                    ltfCloseLine := line.new(int(startMs), localClose, currentRight, localClose, color=ltfCloseLineColor, width=ltfCloseLineWidth, style=ltfCloseLineStyle, xloc=xloc.bar_time)
+                else
+                    line.set_x1(ltfCloseLine, int(startMs))
+                    line.set_x2(ltfCloseLine, currentRight)
+                    line.set_y1(ltfCloseLine, localClose)
+                    line.set_y2(ltfCloseLine, localClose)
+            if ltfShowMidLine
+                midLocal = (localHigh + localLow) / 2
+                if na(ltfMidLine)
+                    ltfMidLine := line.new(int(startMs), midLocal, currentRight, midLocal, color=ltfMidLineColor, width=ltfMidLineWidth, style=ltfMidLineStyle, xloc=xloc.bar_time)
+                else
+                    line.set_x1(ltfMidLine, int(startMs))
+                    line.set_x2(ltfMidLine, currentRight)
+                    line.set_y1(ltfMidLine, midLocal)
+                    line.set_y2(ltfMidLine, midLocal)
+
+//=============================================================================
+// 05 BOX OFFSET LINES LOGIC (0.1% and 0.5%)
+//=============================================================================
+// Detect when 05 box completes (extendedTracking goes from true to false)
+if prevExtendedTracking and not extendedTracking and not na(extendedHigh) and not na(extendedLow)
+    // 05 box just completed - store the data
+    completed05High := extendedHigh
+    completed05Low := extendedLow
+    completed05StartTime := tfTime
+
+    // Calculate 30 minute extension (30 * 60 * 1000 milliseconds)
+    int thirtyMinMs = 30 * 60 * 1000
+    int lineEndTime = tfTime + thirtyMinMs
+
+    // Calculate offset levels using exact percentage method (matching Daily Profiler v2.2.1)
+    // No tick rounding applied - uses raw calculated percentage values
+    float highOffset01Pct = completed05High * 1.001   // 0.1% above
+    float lowOffset01Pct = completed05Low * 0.999     // 0.1% below
+    float highOffset05Pct = completed05High * 1.0005  // 0.05% above
+    float lowOffset05Pct = completed05Low * 0.9995    // 0.05% below
+
+    // Draw 0.1% offset lines
+    if enable01PctOffset
+        // High 0.1% line
+        line highLine01 = line.new(tfTime, highOffset01Pct, lineEndTime, highOffset01Pct,
+                                     color=offset01PctLineColor, width=offset01PctLineWidth,
+                                     style=offset01PctLineStyle, xloc=xloc.bar_time)
+        array.push(offset01PctHighLines, highLine01)
+
+        // High 0.1% label
+        label highLabel01 = label.new(lineEndTime, highOffset01Pct, ".1%",
+                                       xloc=xloc.bar_time, style=label.style_label_left,
+                                       color=color.new(color.black, 100),
+                                       textcolor=offset01PctLineColor, size=size.small)
+        array.push(offset01PctHighLabels, highLabel01)
+
+        // Low 0.1% line
+        line lowLine01 = line.new(tfTime, lowOffset01Pct, lineEndTime, lowOffset01Pct,
+                                   color=offset01PctLineColor, width=offset01PctLineWidth,
+                                   style=offset01PctLineStyle, xloc=xloc.bar_time)
+        array.push(offset01PctLowLines, lowLine01)
+
+        // Low 0.1% label
+        label lowLabel01 = label.new(lineEndTime, lowOffset01Pct, ".1%",
+                                      xloc=xloc.bar_time, style=label.style_label_left,
+                                      color=color.new(color.black, 100),
+                                      textcolor=offset01PctLineColor, size=size.small)
+        array.push(offset01PctLowLabels, lowLabel01)
+
+    // Draw 0.05% offset lines
+    if enable05PctOffset
+        // High 0.05% line
+        line highLine05 = line.new(tfTime, highOffset05Pct, lineEndTime, highOffset05Pct,
+                                     color=offset05PctLineColor, width=offset05PctLineWidth,
+                                     style=offset05PctLineStyle, xloc=xloc.bar_time)
+        array.push(offset05PctHighLines, highLine05)
+
+        // High 0.05% label
+        label highLabel05 = label.new(lineEndTime, highOffset05Pct, ".05%",
+                                       xloc=xloc.bar_time, style=label.style_label_left,
+                                       color=color.new(color.black, 100),
+                                       textcolor=offset05PctLineColor, size=size.small)
+        array.push(offset05PctHighLabels, highLabel05)
+
+        // Low 0.05% line
+        line lowLine05 = line.new(tfTime, lowOffset05Pct, lineEndTime, lowOffset05Pct,
+                                   color=offset05PctLineColor, width=offset05PctLineWidth,
+                                   style=offset05PctLineStyle, xloc=xloc.bar_time)
+        array.push(offset05PctLowLines, lowLine05)
+
+        // Low 0.05% label
+        label lowLabel05 = label.new(lineEndTime, lowOffset05Pct, ".05%",
+                                      xloc=xloc.bar_time, style=label.style_label_left,
+                                      color=color.new(color.black, 100),
+                                      textcolor=offset05PctLineColor, size=size.small)
+        array.push(offset05PctLowLabels, lowLabel05)
+
+    // Manage array sizes to prevent too many objects
+    if array.size(offset01PctHighLines) > 200
+        line.delete(array.shift(offset01PctHighLines))
+    if array.size(offset01PctLowLines) > 200
+        line.delete(array.shift(offset01PctLowLines))
+    if array.size(offset05PctHighLines) > 200
+        line.delete(array.shift(offset05PctHighLines))
+    if array.size(offset05PctLowLines) > 200
+        line.delete(array.shift(offset05PctLowLines))
+    if array.size(offset01PctHighLabels) > 200
+        label.delete(array.shift(offset01PctHighLabels))
+    if array.size(offset01PctLowLabels) > 200
+        label.delete(array.shift(offset01PctLowLabels))
+    if array.size(offset05PctHighLabels) > 200
+        label.delete(array.shift(offset05PctHighLabels))
+    if array.size(offset05PctLowLabels) > 200
+        label.delete(array.shift(offset05PctLowLabels))
+
+    //=========================================================================
+    // INITIALIZE BREAKOUT TRACKING FOR NEW HOUR
+    //=========================================================================
+    if enableTrackingTable
+        // Reset all tracking variables for the new hour
+        currentHourStartTime := tfTime
+        breakoutDirection := "NONE"
+        breakoutInQ1 := false
+        breakoutTime := na
+
+        // Reset Q1 line hit tracking
+        q1_touched_05pct := false
+        q1_closed_beyond_05pct := false
+        q1_touched_1pct := false
+        q1_closed_beyond_1pct := false
+        q1_no_line_hit := true  // Assume no hit until proven otherwise
+
+        // Reset full hour line hit tracking
+        hour_touched_05pct := false
+        hour_closed_beyond_05pct := false
+        hour_touched_1pct := false
+        hour_closed_beyond_1pct := false
+
+        // Reset reversal tracking
+        reversal_type_a := false
+        reversal_type_b := false
+        reversal_type_c := false
+        reversal_type_d := false
+
+        // Reset continuation tracking
+        continued_direction := false
+
+        // Store current 05 box and offset line levels
+        current_05_high := completed05High
+        current_05_low := completed05Low
+        current_05pct_high := highOffset05Pct
+        current_05pct_low := lowOffset05Pct
+        current_1pct_high := highOffset01Pct
+        current_1pct_low := lowOffset01Pct
+
+// Update previous tracking state
+prevExtendedTracking := extendedTracking
+
+//=============================================================================
+// INDEPENDENT 05 BOX CALCULATION (for tracking only - no drawing required)
+//=============================================================================
+// Calculate 05 box values on EVERY new hour, independent of box drawing
+// This ensures we capture ALL historical data, not just where boxes are drawn
+var float tracking_05_high = na
+var float tracking_05_low = na
+var int tracking_05_start_time = na
+var bool tracking_05_complete = false
+
+// On each bar within the first 5 minutes of an hour, track high/low
+if enableTrackingTable
+    // Count total bars processed
+    debug_total_bars += 1
+
+    // Initialize on very first bar
+    if barstate.isfirst
+        tracking_05_high := high
+        tracking_05_low := low
+        tracking_05_start_time := tfTime
+        tracking_05_complete := false
+        // Also initialize current tracking
+        currentHourStartTime := tfTime
+
+    // Check if we're in the first 5 minutes of the hour (0-5 minutes)
+    int minutesSinceHourStart = (time - tfTime) / 60000
+    bool inFirst5Min = minutesSinceHourStart >= 0 and minutesSinceHourStart < 5
+
+    // When new hour starts, initialize for the new hour FIRST
+    if isNewPeriod
+        debug_new_period_count += 1
+
+        // Use tracking_05 values even if not "complete" - be more aggressive about capturing data
+        // This ensures we don't lose hours due to tracking_05_complete not being set
+        if not na(tracking_05_high) and not na(tracking_05_low)
+            debug_tracking_init_count += 1
+
+            currentHourStartTime := tfTime
+            current_05_high := tracking_05_high
+            current_05_low := tracking_05_low
+            current_05pct_high := current_05_high * 1.0005
+            current_05pct_low := current_05_low * 0.9995
+            current_1pct_high := current_05_high * 1.001
+            current_1pct_low := current_05_low * 0.999
+
+            // Reset tracking flags for new hour
+            breakoutDirection := "NONE"
+            breakoutInQ1 := false
+            breakoutTime := na
+            q1_touched_05pct := false
+            q1_closed_beyond_05pct := false
+            q1_touched_1pct := false
+            q1_closed_beyond_1pct := false
+            q1_no_line_hit := true
+            hour_touched_05pct := false
+            hour_closed_beyond_05pct := false
+            hour_touched_1pct := false
+            hour_closed_beyond_1pct := false
+            reversal_type_a := false
+            reversal_type_b := false
+            reversal_type_c := false
+            reversal_type_d := false
+            continued_direction := false
+
+        // Reset 05 box tracking for the new hour
+        tracking_05_high := high
+        tracking_05_low := low
+        tracking_05_start_time := tfTime
+        tracking_05_complete := false
+
+    // Update high/low during first 5 minutes
+    if inFirst5Min and not na(tracking_05_high)
+        tracking_05_high := math.max(tracking_05_high, high)
+        tracking_05_low := math.min(tracking_05_low, low)
+
+    // Mark as complete when we exit the 5-minute window
+    if not inFirst5Min and not tracking_05_complete and not na(tracking_05_high)
+        tracking_05_complete := true
+        debug_05box_complete_count += 1
+
+//=============================================================================
+// BREAKOUT TRACKING LOGIC (PER BAR)
+//=============================================================================
+// Track breakouts independently of whether boxes are drawn (removed enableLTFBox requirement)
+if enableTrackingTable and not na(currentHourStartTime) and not na(current_05_high) and not na(current_05_low)
+    // Calculate Q1 end time (15 minutes = 900000 ms)
+    int q1EndTime = currentHourStartTime + 900000
+    int hourEndTime = currentHourStartTime + 3600000
+
+    bool inQ1 = time >= currentHourStartTime and time < q1EndTime
+    bool inCurrentHour = time >= currentHourStartTime and time < hourEndTime
+
+    // Only track if we're in the current hour
+    if inCurrentHour
+        // =====================================================================
+        // BREAKOUT DETECTION (Q1 ONLY, FIRST BREAKOUT)
+        // =====================================================================
+        if inQ1 and breakoutDirection == "NONE"
+            // Check for breakout above
+            if high > current_05_high
+                breakoutDirection := "UP"
+                breakoutInQ1 := true
+                breakoutTime := time
+            // Check for breakout below
+            else if low < current_05_low
+                breakoutDirection := "DOWN"
+                breakoutInQ1 := true
+                breakoutTime := time
+
+        // =====================================================================
+        // LINE HIT DETECTION (if breakout occurred)
+        // =====================================================================
+        if breakoutDirection != "NONE"
+            // Determine which lines to monitor based on breakout direction
+            bool monitorUpperLines = breakoutDirection == "UP"
+            bool monitorLowerLines = breakoutDirection == "DOWN"
+
+            // Monitor appropriate lines in breakout direction
+            if monitorUpperLines
+                // Check 0.05% line (upper)
+                if high >= current_05pct_high
+                    hour_touched_05pct := true
+                    if inQ1
+                        q1_touched_05pct := true
+                        q1_no_line_hit := false
+                    if close >= current_05pct_high
+                        hour_closed_beyond_05pct := true
+                        if inQ1
+                            q1_closed_beyond_05pct := true
+
+                // Check 0.1% line (upper)
+                if high >= current_1pct_high
+                    hour_touched_1pct := true
+                    hour_touched_05pct := true  // If hit .1%, we also hit .05%
+                    if inQ1
+                        q1_touched_1pct := true
+                        q1_touched_05pct := true
+                        q1_no_line_hit := false
+                    if close >= current_1pct_high
+                        hour_closed_beyond_1pct := true
+                        hour_closed_beyond_05pct := true  // If closed beyond .1%, also beyond .05%
+                        if inQ1
+                            q1_closed_beyond_1pct := true
+                            q1_closed_beyond_05pct := true
+
+            else if monitorLowerLines
+                // Check 0.05% line (lower)
+                if low <= current_05pct_low
+                    hour_touched_05pct := true
+                    if inQ1
+                        q1_touched_05pct := true
+                        q1_no_line_hit := false
+                    if close <= current_05pct_low
+                        hour_closed_beyond_05pct := true
+                        if inQ1
+                            q1_closed_beyond_05pct := true
+
+                // Check 0.1% line (lower)
+                if low <= current_1pct_low
+                    hour_touched_1pct := true
+                    hour_touched_05pct := true  // If hit .1%, we also hit .05%
+                    if inQ1
+                        q1_touched_1pct := true
+                        q1_touched_05pct := true
+                        q1_no_line_hit := false
+                    if close <= current_1pct_low
+                        hour_closed_beyond_1pct := true
+                        hour_closed_beyond_05pct := true  // If closed beyond .1%, also beyond .05%
+                        if inQ1
+                            q1_closed_beyond_1pct := true
+                            q1_closed_beyond_05pct := true
+
+            // =================================================================
+            // REVERSAL DETECTION (4 TYPES)
+            // =================================================================
+            if breakoutDirection == "UP"
+                // Type A: Broke through opposite side of 05 box
+                if low < current_05_low
+                    reversal_type_a := true
+
+                // Type B: Closed on opposite side of 05 box
+                if close < current_05_low
+                    reversal_type_b := true
+
+                // Type C: Hit opposite side's 0.05% or 0.1% lines
+                if low <= current_05pct_low or low <= current_1pct_low
+                    reversal_type_c := true
+
+            else if breakoutDirection == "DOWN"
+                // Type A: Broke through opposite side of 05 box
+                if high > current_05_high
+                    reversal_type_a := true
+
+                // Type B: Closed on opposite side of 05 box
+                if close > current_05_high
+                    reversal_type_b := true
+
+                // Type C: Hit opposite side's 0.05% or 0.1% lines
+                if high >= current_05pct_high or high >= current_1pct_high
+                    reversal_type_c := true
+
+//=============================================================================
+// HOUR END TRACKING (Save data when new hour begins)
+//=============================================================================
+// Save data for the PREVIOUS hour when a new hour starts
+// We need valid 05 box data to save meaningful statistics
+if isNewPeriod and enableTrackingTable and not na(currentHourStartTime) and not na(current_05_high) and not na(current_05_low)
+    // Check continuation and reversal Type D using previous hour's close
+    if breakoutDirection == "UP"
+        // Continuation: hourly candle closed above 05 box high
+        continued_direction := tfClose[1] > current_05_high
+        // Reversal Type D: hourly candle closed below 05 box (opposite to breakout)
+        reversal_type_d := tfClose[1] < current_05_low
+
+        // Hour-end close position checks (for Q1 conditional analysis)
+        hour_end_closed_past_05box := tfClose[1] > current_05_high
+        hour_end_closed_past_05pct := tfClose[1] >= current_05pct_high
+        hour_end_closed_past_1pct := tfClose[1] >= current_1pct_high
+
+    else if breakoutDirection == "DOWN"
+        // Continuation: hourly candle closed below 05 box low
+        continued_direction := tfClose[1] < current_05_low
+        // Reversal Type D: hourly candle closed above 05 box (opposite to breakout)
+        reversal_type_d := tfClose[1] > current_05_high
+
+        // Hour-end close position checks (for Q1 conditional analysis)
+        hour_end_closed_past_05box := tfClose[1] < current_05_low
+        hour_end_closed_past_05pct := tfClose[1] <= current_05pct_low
+        hour_end_closed_past_1pct := tfClose[1] <= current_1pct_low
+
+    // Save data to historical arrays
+    debug_data_saved_count += 1
+    array.push(hist_hour_start_times, currentHourStartTime)
+    array.push(hist_breakout_directions, breakoutDirection)
+    array.push(hist_breakout_in_q1, breakoutInQ1)
+
+    // Save Q1 metrics
+    array.push(hist_q1_touched_05pct, q1_touched_05pct)
+    array.push(hist_q1_closed_beyond_05pct, q1_closed_beyond_05pct)
+    array.push(hist_q1_touched_1pct, q1_touched_1pct)
+    array.push(hist_q1_closed_beyond_1pct, q1_closed_beyond_1pct)
+    array.push(hist_q1_no_line_hit, q1_no_line_hit)
+
+    // Save full hour metrics
+    array.push(hist_hour_touched_05pct, hour_touched_05pct)
+    array.push(hist_hour_closed_beyond_05pct, hour_closed_beyond_05pct)
+    array.push(hist_hour_touched_1pct, hour_touched_1pct)
+    array.push(hist_hour_closed_beyond_1pct, hour_closed_beyond_1pct)
+
+    // Save reversal metrics
+    array.push(hist_reversal_type_a, reversal_type_a)
+    array.push(hist_reversal_type_b, reversal_type_b)
+    array.push(hist_reversal_type_c, reversal_type_c)
+    array.push(hist_reversal_type_d, reversal_type_d)
+
+    // Save continuation metric
+    array.push(hist_continued_direction, continued_direction)
+
+    // Save hour-end close position metrics
+    array.push(hist_hour_end_closed_past_05box, hour_end_closed_past_05box)
+    array.push(hist_hour_end_closed_past_05pct, hour_end_closed_past_05pct)
+    array.push(hist_hour_end_closed_past_1pct, hour_end_closed_past_1pct)
+
+    // Maintain array sizes (max 5000 hours - ~7 months of data)
+    if array.size(hist_hour_start_times) > 5000
+        array.shift(hist_hour_start_times)
+        array.shift(hist_breakout_directions)
+        array.shift(hist_breakout_in_q1)
+        array.shift(hist_q1_touched_05pct)
+        array.shift(hist_q1_closed_beyond_05pct)
+        array.shift(hist_q1_touched_1pct)
+        array.shift(hist_q1_closed_beyond_1pct)
+        array.shift(hist_q1_no_line_hit)
+        array.shift(hist_hour_touched_05pct)
+        array.shift(hist_hour_closed_beyond_05pct)
+        array.shift(hist_hour_touched_1pct)
+        array.shift(hist_hour_closed_beyond_1pct)
+        array.shift(hist_reversal_type_a)
+        array.shift(hist_reversal_type_b)
+        array.shift(hist_reversal_type_c)
+        array.shift(hist_reversal_type_d)
+        array.shift(hist_continued_direction)
+        array.shift(hist_hour_end_closed_past_05box)
+        array.shift(hist_hour_end_closed_past_05pct)
+        array.shift(hist_hour_end_closed_past_1pct)
+
+//=============================================================================
+// DELETION SECTION (LAST BAR) - QUARTERLY OBJECTS (HTF 1)
+//=============================================================================
+if barstate.islast and onlyShowCurrentBox and not na(activeTfTime)
+    if globalQuarterly and showQuarterBoxes
+        for i = 0 to array.size(quarterBox1) - 1
+            q = array.get(quarterBox1, i)
+            if box.get_left(q) < activeTfTime or box.get_left(q) >= activeTfTime + duration
+                box.delete(q)
+        for i = 0 to array.size(quarterBox2) - 1
+            q = array.get(quarterBox2, i)
+            if box.get_left(q) < activeTfTime or box.get_left(q) >= activeTfTime + duration
+                box.delete(q)
+        for i = 0 to array.size(quarterBox3) - 1
+            q = array.get(quarterBox3, i)
+            if box.get_left(q) < activeTfTime or box.get_left(q) >= activeTfTime + duration
+                box.delete(q)
+        for i = 0 to array.size(quarterBox4) - 1
+            q = array.get(quarterBox4, i)
+            if box.get_left(q) < activeTfTime or box.get_left(q) >= activeTfTime + duration
+                box.delete(q)
+    if globalQuarterly and showQuarterLines
+        for i = 0 to array.size(allVerticals) - 1
+            v = array.get(allVerticals, i)
+            x = line.get_x1(v)
+            pos1 = activeTfTime + duration/4
+            pos2 = activeTfTime + duration/2
+            pos3 = activeTfTime + 3*duration/4
+            if x != pos1 and x != pos2 and x != pos3
+                line.delete(v)
+
+//=============================================================================
+// DELETION SECTION (LAST BAR) - QUARTERLY OBJECTS (HTF 2)
+//=============================================================================
+if barstate.islast and onlyShowCurrentBox2 and not na(activeTfTime2)
+    if globalQuarterly2 and showQuarterBoxes2
+        for i = 0 to array.size(quarterBox1_2) - 1
+            q = array.get(quarterBox1_2, i)
+            if box.get_left(q) < activeTfTime2 or box.get_left(q) >= activeTfTime2 + duration2
+                box.delete(q)
+        for i = 0 to array.size(quarterBox2_2) - 1
+            q = array.get(quarterBox2_2, i)
+            if box.get_left(q) < activeTfTime2 or box.get_left(q) >= activeTfTime2 + duration2
+                box.delete(q)
+        for i = 0 to array.size(quarterBox3_2) - 1
+            q = array.get(quarterBox3_2, i)
+            if box.get_left(q) < activeTfTime2 or box.get_left(q) >= activeTfTime2 + duration2
+                box.delete(q)
+        for i = 0 to array.size(quarterBox4_2) - 1
+            q = array.get(quarterBox4_2, i)
+            if box.get_left(q) < activeTfTime2 or box.get_left(q) >= activeTfTime2 + duration2
+                box.delete(q)
+    if globalQuarterly2 and showQuarterLines2
+        for i = 0 to array.size(allVerticals2) - 1
+            v = array.get(allVerticals2, i)
+            x = line.get_x1(v)
+            pos1 = activeTfTime2 + duration2/4
+            pos2 = activeTfTime2 + duration2/2
+            pos3 = activeTfTime2 + 3*duration2/4
+            if x != pos1 and x != pos2 and x != pos3
+                line.delete(v)
+
+//=============================================================================
+// 0930 OPENING PRICE BOX (Toggle-able)
+//=============================================================================
+if enable0930OpeningBox
+    // Use the global 0930 inputs declared earlier.
+    s_timeAnchor = f_anchorCandleData(time)
+    s_highAnchor = f_anchorCandleData(high)
+    s_lowAnchor = f_anchorCandleData(low)
+    s_openAnchor = f_anchorCandleData(open)
+    s_closeAnchor = f_anchorCandleData(close)
+    
+    var int boxTime0930 = na
+    var float boxHigh0930 = na
+    var float boxLow0930 = na
+    var float boxOpen0930 = na
+    var float boxClose0930 = na
+    var box openingBox = na
+    var line openLine0930 = na
+    var line closeLine0930 = na
+    
+    if ta.change(time("D"))? true:false
+        boxTime0930 := na
+        boxHigh0930 := na
+        boxLow0930 := na
+        boxOpen0930 := na
+        boxClose0930 := na
+        openingBox := na
+        openLine0930 := na
+        closeLine0930 := na
+    
+    if na(boxTime0930) and not na(s_timeAnchor)
+        boxTime0930 := s_timeAnchor
+        boxHigh0930 := s_highAnchor
+        boxLow0930 := s_lowAnchor
+        boxOpen0930 := s_openAnchor
+        boxClose0930 := s_closeAnchor
+        openingBoxTime := boxTime0930  // update global variable for barcolor use
+    
+    var int sessEnd0930 = na
+    if not na(boxTime0930)
+        sessEnd0930 := timestamp(timezone, year(boxTime0930), month(boxTime0930), dayofmonth(boxTime0930), endHour, endMinute)
+    
+    barDurationMs = str.tonumber(timeframe.period) * 60000
+    extension_ms = boxOffsetInput * barDurationMs
+    var int x2_0930 = na
+    if not na(sessEnd0930)
+        x2_0930 := math.min(int(time + extension_ms), sessEnd0930)
+    
+    if showBox and not na(boxTime0930)
+        borderCol = showBoxOutline ? boxBorderColor : color.new(boxBorderColor, 100)
+        if na(openingBox)
+            openingBox := box.new(boxTime0930, boxHigh0930, x2_0930, boxLow0930, border_color=borderCol, border_width=boxBorderWidth0930, bgcolor=boxBgColor, xloc=xloc.bar_time)
+        else if not na(x2_0930)
+            box.set_right(openingBox, x2_0930)
+    
+    if show0930OpenLine and not na(boxTime0930)
+        if na(openLine0930)
+            openLine0930 := line.new(boxTime0930, boxOpen0930, x2_0930, boxOpen0930, color=openLineColor0930, width=lineWidth0930, style=lineStyle0930, xloc=xloc.bar_time)
+        else if not na(x2_0930)
+            line.set_xy2(openLine0930, x2_0930, boxOpen0930)
+    
+    if show0930CloseLine and not na(boxTime0930)
+        if na(closeLine0930)
+            closeLine0930 := line.new(boxTime0930, boxClose0930, x2_0930, boxClose0930, color=closeLineColor0930, width=lineWidth0930, style=lineStyle0930, xloc=xloc.bar_time)
+        else if not na(x2_0930)
+            line.set_xy2(closeLine0930, x2_0930, boxClose0930)
+    
+    var label anchorLabel0930 = na
+    if showLabel0930 and not na(boxTime0930) and not na(x2_0930)
+        labelY = (boxHigh0930 + boxLow0930) / 2
+        if na(anchorLabel0930)
+            anchorLabel0930 := label.new(x2_0930, labelY, anchorTimeStr, xloc=xloc.bar_time, style=label.style_label_left, textcolor=labelTextColor0930, color=color.new(color.black, 100))
+        else
+            label.set_xy(anchorLabel0930, x2_0930, labelY)
+            label.set_text(anchorLabel0930, anchorTimeStr)
+    else if not showLabel0930 and not na(anchorLabel0930)
+        label.delete(anchorLabel0930)
+        anchorLabel0930 := na
+
+// If the 0930 box is enabled and recolor is enabled, color the bar when time equals openingBoxTime.
+barcolor(enable0930OpeningBox ? (recolorCandle0930 and time == openingBoxTime ? candleColor0930 : na) : na)
+
+//=============================================================================
+// HOD/LOD Indicator
+//=============================================================================
+var HODLODSettings = "HOD/LOD Settings"
+enableHODLOD = input.bool(true, "Enable HOD/LOD Labels", inline = "HODLODSettings", group=HODLODSettings)
+meas_time = input.session("1800-1615", "HOD/LOD Session Period", inline = "HODLODSettings", group=HODLODSettings)
+labelBgColorHOD = input.color(color.green, "HOD Background", group=HODLODSettings, inline = "HOD")
+labelTextColorHOD = input.color(color.black, "HOD Text", group=HODLODSettings, inline = "HOD")
+labelSizeInputHOD = input.string("small", "", options=["tiny", "small", "normal", "large", "huge"], group=HODLODSettings, inline = "HOD")
+labelSizeHOD = labelSizeInputHOD == "tiny"   ? size.tiny   : 
+               labelSizeInputHOD == "small"  ? size.small  : 
+               labelSizeInputHOD == "normal" ? size.normal : 
+               labelSizeInputHOD == "large"  ? size.large  : size.huge
+
+labelBgColorLOD = input.color(color.red, "LOD Background", group=HODLODSettings, inline = "LOD")
+labelTextColorLOD = input.color(color.white, "LOD Text", group=HODLODSettings, inline = "LOD")
+labelSizeInputLOD = input.string("small", "", options=["tiny", "small", "normal", "large", "huge"], group=HODLODSettings, inline = "LOD")
+labelSizeLOD = labelSizeInputLOD == "tiny"   ? size.tiny   : 
+               labelSizeInputLOD == "small"  ? size.small  : 
+               labelSizeInputLOD == "normal" ? size.normal : 
+               labelSizeInputLOD == "large"  ? size.large  : size.huge
+
+var float open_price = na
+var float HOD = na
+var float LOD = na
+var float HOD_pct = na
+var float LOD_pct = na
+var int HOD_time = na
+var int LOD_time = na
+var label HOD_label = na
+var label LOD_label = na
+td = time - time[1]
+hourEST = hour(time, "America/New_York")
+
+// Using daily open price
+open_price := request.security(syminfo.tickerid, "D", open, lookahead=barmerge.lookahead_on)
+t = not na(time("", meas_time, "America/New_York"))
+Close_t = t[1] and (not t or na(t))
+
+//---------------------------
+// Create or Update Labels at Session Start
+//---------------------------
+if enableHODLOD
+    if hourEST == 18 and minute == 0
+        HOD := high
+        LOD := low
+        HOD_time := time
+        LOD_time := time
+        HOD_pct := math.round(((HOD - open_price) / open_price) * 100, 2)
+        LOD_pct := math.round(((LOD - open_price) / open_price) * 100, 2)
+        HOD_label := label.new(HOD_time, HOD, xloc=xloc.bar_time, style=label.style_label_down, 
+             color=labelBgColorHOD, textcolor=labelTextColorHOD, size=labelSizeHOD,
+             text=str.tostring(HOD_pct) + " %\n" + str.format_time(HOD_time, "HH:mm", timezone="America/New_York"))
+        LOD_label := label.new(LOD_time, LOD, xloc=xloc.bar_time, style=label.style_label_up, 
+             color=labelBgColorLOD, textcolor=labelTextColorLOD, size=labelSizeLOD,
+             text=str.tostring(LOD_pct) + " %\n" + str.format_time(LOD_time, "HH:mm", timezone="America/New_York"))
+
+    //---------------------------
+    // Update Labels During the Session
+    //---------------------------
+    if t
+        if high > HOD
+            HOD := high
+            HOD_time := time
+            HOD_pct := math.round(((HOD - open_price) / open_price) * 100, 2)
+            label.set_xy(HOD_label, HOD_time, HOD)
+            label.set_text(HOD_label, str.tostring(HOD_pct) + " %\n" + str.format_time(HOD_time, "HH:mm", timezone="America/New_York"))
+        if low < LOD
+            LOD := low
+            LOD_time := time
+            LOD_pct := math.round(((LOD - open_price) / open_price) * 100, 2)
+            label.set_xy(LOD_label, LOD_time, LOD)
+            label.set_text(LOD_label, str.tostring(LOD_pct) + " %\n" + str.format_time(LOD_time, "HH:mm", timezone="America/New_York"))
+
+//=============================================================================
+// BREAKOUT TRACKING TABLE - STATISTICS CALCULATION & DISPLAY
+//=============================================================================
+if enableTrackingTable and barstate.islast
+    // =========================================================================
+    // FILTER DATA BASED ON HOUR AND LOOKBACK PERIOD
+    // =========================================================================
+    int dataSize = array.size(hist_hour_start_times)
+
+    // Calculate lookback cutoff time
+    int lookbackCutoffTime = na
+    if trackingLookbackMode == "Custom Days"
+        lookbackCutoffTime := timenow - (trackingLookbackDays * 24 * 60 * 60 * 1000)
+
+    // Filter and count data
+    int totalBreakouts = 0
+    int breakoutsUp = 0
+    int breakoutsDown = 0
+    int noBreakouts = 0
+
+    // Q1 metrics
+    int q1_touched_05_count = 0
+    int q1_closed_05_count = 0
+    int q1_touched_1_count = 0
+    int q1_closed_1_count = 0
+    int q1_no_line_count = 0
+
+    // Full hour metrics
+    int hour_touched_05_count = 0
+    int hour_closed_05_count = 0
+    int hour_touched_1_count = 0
+    int hour_closed_1_count = 0
+
+    // Continuation and reversal counts
+    int continued_count = 0
+    int reversal_a_count = 0
+    int reversal_b_count = 0
+    int reversal_c_count = 0
+    int reversal_d_count = 0
+
+    // Count breakouts with actual direction (exclude NONE)
+    int breakoutsWithDirection = 0
+
+    // Loop through all historical data
+    for i = 0 to dataSize - 1
+        int hourStartTime = array.get(hist_hour_start_times, i)
+
+        // Apply lookback filter
+        bool passesLookback = true
+        if trackingLookbackMode == "Custom Days"
+            passesLookback := hourStartTime >= lookbackCutoffTime
+
+        // Apply hour filter
+        bool passesHourFilter = true
+        if trackingHourFilter >= 0
+            int hourOfData = hour(hourStartTime, "America/New_York")
+            passesHourFilter := hourOfData == trackingHourFilter
+
+        // Only count if passes both filters
+        if passesLookback and passesHourFilter
+            string direction = array.get(hist_breakout_directions, i)
+
+            // Count breakout directions
+            if direction == "UP"
+                breakoutsUp += 1
+                breakoutsWithDirection += 1
+            else if direction == "DOWN"
+                breakoutsDown += 1
+                breakoutsWithDirection += 1
+            else
+                noBreakouts += 1
+
+            totalBreakouts += 1
+
+            // Only count line hits and continuations if there was a breakout
+            if direction != "NONE"
+                // Q1 metrics
+                if array.get(hist_q1_touched_05pct, i)
+                    q1_touched_05_count += 1
+                if array.get(hist_q1_closed_beyond_05pct, i)
+                    q1_closed_05_count += 1
+                if array.get(hist_q1_touched_1pct, i)
+                    q1_touched_1_count += 1
+                if array.get(hist_q1_closed_beyond_1pct, i)
+                    q1_closed_1_count += 1
+                if array.get(hist_q1_no_line_hit, i)
+                    q1_no_line_count += 1
+
+                // Full hour metrics
+                if array.get(hist_hour_touched_05pct, i)
+                    hour_touched_05_count += 1
+                if array.get(hist_hour_closed_beyond_05pct, i)
+                    hour_closed_05_count += 1
+                if array.get(hist_hour_touched_1pct, i)
+                    hour_touched_1_count += 1
+                if array.get(hist_hour_closed_beyond_1pct, i)
+                    hour_closed_1_count += 1
+
+                // Continuation and reversals
+                if array.get(hist_continued_direction, i)
+                    continued_count += 1
+                if array.get(hist_reversal_type_a, i)
+                    reversal_a_count += 1
+                if array.get(hist_reversal_type_b, i)
+                    reversal_b_count += 1
+                if array.get(hist_reversal_type_c, i)
+                    reversal_c_count += 1
+                if array.get(hist_reversal_type_d, i)
+                    reversal_d_count += 1
+
+    // =========================================================================
+    // CALCULATE PERCENTAGES
+    // =========================================================================
+    float pctUp = totalBreakouts > 0 ? (breakoutsUp / totalBreakouts) * 100 : 0
+    float pctDown = totalBreakouts > 0 ? (breakoutsDown / totalBreakouts) * 100 : 0
+    float pctNone = totalBreakouts > 0 ? (noBreakouts / totalBreakouts) * 100 : 0
+
+    // Q1 percentages (based on breakouts with direction only)
+    float pct_q1_touched_05 = breakoutsWithDirection > 0 ? (q1_touched_05_count / breakoutsWithDirection) * 100 : 0
+    float pct_q1_closed_05 = breakoutsWithDirection > 0 ? (q1_closed_05_count / breakoutsWithDirection) * 100 : 0
+    float pct_q1_touched_1 = breakoutsWithDirection > 0 ? (q1_touched_1_count / breakoutsWithDirection) * 100 : 0
+    float pct_q1_closed_1 = breakoutsWithDirection > 0 ? (q1_closed_1_count / breakoutsWithDirection) * 100 : 0
+    float pct_q1_no_line = breakoutsWithDirection > 0 ? (q1_no_line_count / breakoutsWithDirection) * 100 : 0
+
+    // Continuation and reversal percentages (based on breakouts with direction only)
+    float pct_continued = breakoutsWithDirection > 0 ? (continued_count / breakoutsWithDirection) * 100 : 0
+    float pct_reversal_d = breakoutsWithDirection > 0 ? (reversal_d_count / breakoutsWithDirection) * 100 : 0
+
+    // =========================================================================
+    // CONDITIONAL STATISTICS: Q1 → Hour End Outcomes
+    // =========================================================================
+    // Count hour-end outcomes for hours that closed beyond .05% in Q1
+    int q1_closed_05_total = 0
+    int q1_closed_05_ended_past_05box = 0
+    int q1_closed_05_ended_past_05pct = 0
+
+    // Count hour-end outcomes for hours that closed beyond .1% in Q1
+    int q1_closed_1_total = 0
+    int q1_closed_1_ended_past_05box = 0
+    int q1_closed_1_ended_past_1pct = 0
+
+    // Also count overall continuation past percentage lines
+    int continued_past_05pct_count = 0
+    int continued_past_1pct_count = 0
+
+    // Loop through historical data to calculate conditional metrics
+    for i = 0 to dataSize - 1
+        int hourStartTime = array.get(hist_hour_start_times, i)
+
+        // Apply lookback filter
+        bool passesLookback = true
+        if trackingLookbackMode == "Custom Days"
+            passesLookback := hourStartTime >= lookbackCutoffTime
+
+        // Apply hour filter
+        bool passesHourFilter = true
+        if trackingHourFilter >= 0
+            int hourOfData = hour(hourStartTime, "America/New_York")
+            passesHourFilter := hourOfData == trackingHourFilter
+
+        // Only count if passes both filters
+        if passesLookback and passesHourFilter
+            string direction = array.get(hist_breakout_directions, i)
+
+            // Only analyze hours with actual breakouts
+            if direction != "NONE"
+                // IF Q1 closed beyond .05%, check hour-end outcomes
+                if array.get(hist_q1_closed_beyond_05pct, i)
+                    q1_closed_05_total += 1
+                    if array.get(hist_hour_end_closed_past_05box, i)
+                        q1_closed_05_ended_past_05box += 1
+                    if array.get(hist_hour_end_closed_past_05pct, i)
+                        q1_closed_05_ended_past_05pct += 1
+
+                // IF Q1 closed beyond .1%, check hour-end outcomes
+                if array.get(hist_q1_closed_beyond_1pct, i)
+                    q1_closed_1_total += 1
+                    if array.get(hist_hour_end_closed_past_05box, i)
+                        q1_closed_1_ended_past_05box += 1
+                    if array.get(hist_hour_end_closed_past_1pct, i)
+                        q1_closed_1_ended_past_1pct += 1
+
+                // Count overall continuation past percentage lines
+                if array.get(hist_hour_end_closed_past_05pct, i)
+                    continued_past_05pct_count += 1
+                if array.get(hist_hour_end_closed_past_1pct, i)
+                    continued_past_1pct_count += 1
+
+    // Calculate conditional percentages
+    float pct_q1_05_to_05box = q1_closed_05_total > 0 ? (q1_closed_05_ended_past_05box / q1_closed_05_total) * 100 : 0
+    float pct_q1_05_to_05pct = q1_closed_05_total > 0 ? (q1_closed_05_ended_past_05pct / q1_closed_05_total) * 100 : 0
+    float pct_q1_1_to_05box = q1_closed_1_total > 0 ? (q1_closed_1_ended_past_05box / q1_closed_1_total) * 100 : 0
+    float pct_q1_1_to_1pct = q1_closed_1_total > 0 ? (q1_closed_1_ended_past_1pct / q1_closed_1_total) * 100 : 0
+
+    // Calculate overall continuation percentages for percentage lines
+    float pct_continued_past_05pct = breakoutsWithDirection > 0 ? (continued_past_05pct_count / breakoutsWithDirection) * 100 : 0
+    float pct_continued_past_1pct = breakoutsWithDirection > 0 ? (continued_past_1pct_count / breakoutsWithDirection) * 100 : 0
+
+    // =========================================================================
+    // CREATE AND POPULATE TABLE
+    // =========================================================================
+    // Determine table position
+    tblPos = trackingTablePosition == "Top Left" ? position.top_left : trackingTablePosition == "Top Center" ? position.top_center : trackingTablePosition == "Top Right" ? position.top_right : trackingTablePosition == "Middle Left" ? position.middle_left : trackingTablePosition == "Middle Center" ? position.middle_center : trackingTablePosition == "Middle Right" ? position.middle_right : trackingTablePosition == "Bottom Left" ? position.bottom_left : trackingTablePosition == "Bottom Center" ? position.bottom_center : position.bottom_right
+
+    // Determine table size
+    tblSize = trackingTableSize == "Auto" ? size.auto : trackingTableSize == "Tiny" ? size.tiny : trackingTableSize == "Small" ? size.small : trackingTableSize == "Normal" ? size.normal : trackingTableSize == "Large" ? size.large : size.huge
+
+    var table trackingTable = table.new(tblPos, columns=3, rows=38,
+                                          bgcolor=tableBgColor,
+                                          border_width=2,
+                                          border_color=tableHeaderColor,
+                                          frame_width=2,
+                                          frame_color=tableHeaderColor)
+
+    // Calculate actual lookback period in days
+    string periodText = ""
+    if trackingLookbackMode == "Full Chart"
+        // Calculate days between oldest and newest data
+        if dataSize > 0
+            int oldestTime = array.get(hist_hour_start_times, 0)
+            int newestTime = array.get(hist_hour_start_times, dataSize - 1)
+            int daysDiff = math.round((newestTime - oldestTime) / (24 * 60 * 60 * 1000))
+            periodText := str.tostring(daysDiff) + " days (" + str.tostring(dataSize) + " hours)"
+        else
+            periodText := "No data"
+    else
+        periodText := str.tostring(trackingLookbackDays) + " days (" + str.tostring(dataSize) + " hours)"
+
+    // Row counter
+    int row = 0
+
+    // === HEADER ===
+    table.cell(trackingTable, 0, row, "05 Box Breakout Analysis",
+               text_color=tableTextColor, bgcolor=tableHeaderColor,
+               text_size=tblSize, text_halign=text.align_center,
+               tooltip="Tracks breakouts from the 05 Box (first 5 min high/low of each hour) and measures Q1 behavior (first 15 min) against hour-end outcomes")
+    table.merge_cells(trackingTable, 0, row, 2, row)
+    row += 1
+
+    // === FILTER INFO ===
+    string filterInfo = "Hour: " + (trackingHourFilter < 0 ? "All" : str.tostring(trackingHourFilter)) +
+                         " | Period: " + periodText
+    table.cell(trackingTable, 0, row, filterInfo,
+               text_color=tableTextColor, bgcolor=tableBgColor,
+               text_size=tblSize, text_halign=text.align_center)
+    table.merge_cells(trackingTable, 0, row, 2, row)
+    row += 1
+
+    // === SEPARATOR ===
+    table.cell(trackingTable, 0, row, "━━━━━━━━━━━━━━━━━━━━━",
+               text_color=tableHeaderColor, bgcolor=tableBgColor,
+               text_size=tblSize, text_halign=text.align_center)
+    table.merge_cells(trackingTable, 0, row, 2, row)
+    row += 1
+
+    // === BREAKOUT SUMMARY ===
+    table.cell(trackingTable, 0, row, "Total Hours",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Total number of hours in the selected time period and hour filter")
+    table.cell(trackingTable, 1, row, str.tostring(totalBreakouts),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, "",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Breakouts UP",
+               text_color=color.new(color.green, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Hours where price broke above the 05 box high (first 5 min high) in Q1 (first 15 min)")
+    table.cell(trackingTable, 1, row, str.tostring(breakoutsUp),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pctUp, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Breakouts DOWN",
+               text_color=color.new(color.red, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Hours where price broke below the 05 box low (first 5 min low) in Q1 (first 15 min)")
+    table.cell(trackingTable, 1, row, str.tostring(breakoutsDown),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pctDown, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "No Breakout",
+               text_color=color.new(color.gray, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Hours where price stayed within the 05 box range during Q1 (first 15 min)")
+    table.cell(trackingTable, 1, row, str.tostring(noBreakouts),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pctNone, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    // === SEPARATOR ===
+    table.cell(trackingTable, 0, row, "Q1 Behavior (after breakout)",
+               text_color=tableHeaderColor, bgcolor=tableBgColor,
+               text_size=tblSize, text_halign=text.align_center,
+               tooltip="Q1 = First Quarter = First 15 minutes of each hour. Shows percentage line behavior after an initial 05 box breakout")
+    table.merge_cells(trackingTable, 0, row, 2, row)
+    row += 1
+
+    // === Q1 LINE HITS ===
+    table.cell(trackingTable, 0, row, "Touched .05% line",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Price touched (high/low reached) the .05% offset line from the 05 box during Q1, in the breakout direction. Percentage of hours with a breakout.")
+    table.cell(trackingTable, 1, row, str.tostring(q1_touched_05_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_q1_touched_05, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Closed beyond .05%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Q1 close was beyond (above for UP, below for DOWN) the .05% offset line from the 05 box. This is stronger confirmation than just touching. Percentage of hours with a breakout.")
+    table.cell(trackingTable, 1, row, str.tostring(q1_closed_05_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_q1_closed_05, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Closed beyond .1%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Q1 close was beyond (above for UP, below for DOWN) the .1% offset line from the 05 box. This is the strongest Q1 momentum signal. Percentage of hours with a breakout.")
+    table.cell(trackingTable, 1, row, str.tostring(q1_closed_1_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_q1_closed_1, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "No line hit in Q1",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Price stayed between the 05 box boundary and the .05% line during Q1. Weak momentum after initial breakout. Percentage of hours with a breakout.")
+    table.cell(trackingTable, 1, row, str.tostring(q1_no_line_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_q1_no_line, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    // === Q1 → HOUR END: IF CLOSED BEYOND .05% IN Q1 ===
+    table.cell(trackingTable, 0, row, "IF Q1 closed beyond .05%",
+               text_color=tableHeaderColor, bgcolor=tableBgColor,
+               text_size=tblSize, text_halign=text.align_center,
+               tooltip="Conditional analysis: When Q1 closed beyond the .05% line, what happened at hour-end? Shows follow-through rates from Q1 momentum to hour close.")
+    table.merge_cells(trackingTable, 0, row, 2, row)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Hour closed past 05 box",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Of hours where Q1 closed beyond .05%, percentage where the hourly close was past the 05 box boundary (high for UP, low for DOWN). Basic continuation check.")
+    table.cell(trackingTable, 1, row, str.tostring(q1_closed_05_ended_past_05box) + " of " + str.tostring(q1_closed_05_total),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_q1_05_to_05box, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Hour closed past .05% line",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Of hours where Q1 closed beyond .05%, percentage where the hourly close was still beyond the .05% line. Shows sustained Q1 momentum through hour-end.")
+    table.cell(trackingTable, 1, row, str.tostring(q1_closed_05_ended_past_05pct) + " of " + str.tostring(q1_closed_05_total),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_q1_05_to_05pct, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    // === Q1 → HOUR END: IF CLOSED BEYOND .1% IN Q1 ===
+    table.cell(trackingTable, 0, row, "IF Q1 closed beyond .1%",
+               text_color=tableHeaderColor, bgcolor=tableBgColor,
+               text_size=tblSize, text_halign=text.align_center,
+               tooltip="Conditional analysis: When Q1 closed beyond the .1% line (strong momentum), what happened at hour-end? Shows follow-through rates from strong Q1 moves.")
+    table.merge_cells(trackingTable, 0, row, 2, row)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Hour closed past 05 box",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Of hours where Q1 closed beyond .1%, percentage where the hourly close was past the 05 box boundary. Should be high if strong Q1 momentum sustains.")
+    table.cell(trackingTable, 1, row, str.tostring(q1_closed_1_ended_past_05box) + " of " + str.tostring(q1_closed_1_total),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_q1_1_to_05box, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Hour closed past .1% line",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Of hours where Q1 closed beyond .1%, percentage where the hourly close was still beyond the .1% line. Strongest continuation: Q1 strength → Hour-end strength.")
+    table.cell(trackingTable, 1, row, str.tostring(q1_closed_1_ended_past_1pct) + " of " + str.tostring(q1_closed_1_total),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_q1_1_to_1pct, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    // === SEPARATOR ===
+    table.cell(trackingTable, 0, row, "Hour Outcome",
+               text_color=tableHeaderColor, bgcolor=tableBgColor,
+               text_size=tblSize, text_halign=text.align_center,
+               tooltip="Overall hour-end outcomes for all breakout hours. Shows how often breakouts continue vs reverse by hour close.")
+    table.merge_cells(trackingTable, 0, row, 2, row)
+    row += 1
+
+    // === CONTINUATION ===
+    table.cell(trackingTable, 0, row, "Continued Direction",
+               text_color=color.new(color.green, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Hour closed past the 05 box boundary in the breakout direction. UP breakout → closed above 05 box high; DOWN breakout → closed below 05 box low. Percentage of all breakout hours.")
+    table.cell(trackingTable, 1, row, str.tostring(continued_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_continued, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Continued past .05% line",
+               text_color=color.new(color.green, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Hour closed beyond the .05% offset line in the breakout direction. Stronger continuation than just 05 box. Percentage of all breakout hours.")
+    table.cell(trackingTable, 1, row, str.tostring(continued_past_05pct_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_continued_past_05pct, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Continued past .1% line",
+               text_color=color.new(color.green, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Hour closed beyond the .1% offset line in the breakout direction. Strongest continuation outcome. Percentage of all breakout hours.")
+    table.cell(trackingTable, 1, row, str.tostring(continued_past_1pct_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_continued_past_1pct, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    // === REVERSAL TYPES ===
+    // Calculate reversal percentages
+    float pct_reversal_a = breakoutsWithDirection > 0 ? (reversal_a_count / breakoutsWithDirection) * 100 : 0
+    float pct_reversal_b = breakoutsWithDirection > 0 ? (reversal_b_count / breakoutsWithDirection) * 100 : 0
+    float pct_reversal_c = breakoutsWithDirection > 0 ? (reversal_c_count / breakoutsWithDirection) * 100 : 0
+
+    table.cell(trackingTable, 0, row, "Rev: Broke Opp. Side",
+               text_color=color.new(color.orange, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Reversal Type A: Price broke through the opposite side of the 05 box during the hour. UP breakout → touched below 05 box low; DOWN breakout → touched above 05 box high.")
+    table.cell(trackingTable, 1, row, str.tostring(reversal_a_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_reversal_a, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Rev: Closed Opp. Side",
+               text_color=color.new(color.orange, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Reversal Type B: Hour closed on the opposite side of the 05 box. UP breakout → closed below 05 box low; DOWN breakout → closed above 05 box high. Stronger reversal than Type A.")
+    table.cell(trackingTable, 1, row, str.tostring(reversal_b_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_reversal_b, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Rev: Hit Opp. Lines",
+               text_color=color.new(color.orange, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Reversal Type C: Price touched the opposite .05% or .1% lines during the hour. UP breakout → touched .05% or .1% below box; DOWN breakout → touched .05% or .1% above box. Extreme reversal.")
+    table.cell(trackingTable, 1, row, str.tostring(reversal_c_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_reversal_c, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Rev: Hour Close Opp.",
+               text_color=color.new(color.red, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Reversal Type D: Hour closed beyond the opposite percentage lines (.05% or .1%). Complete directional failure - breakout fully reversed. Most severe reversal pattern.")
+    table.cell(trackingTable, 1, row, str.tostring(reversal_d_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, str.tostring(math.round(pct_reversal_d, 1)) + "%",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    row += 1
+
+    // === DEBUG SECTION ===
+    table.cell(trackingTable, 0, row, "━━━ DEBUG INFO ━━━",
+               text_color=color.new(color.yellow, 0), bgcolor=tableBgColor,
+               text_size=tblSize, text_halign=text.align_center,
+               tooltip="Diagnostic counters to verify the indicator is collecting data correctly. Helps troubleshoot if data seems incomplete.")
+    table.merge_cells(trackingTable, 0, row, 2, row)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Total Bars Processed",
+               text_color=color.new(color.yellow, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Total number of 5-minute bars processed by the indicator. Should match the number of bars on your chart.")
+    table.cell(trackingTable, 1, row, str.tostring(debug_total_bars),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, "",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "New Periods Detected",
+               text_color=color.new(color.yellow, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Number of new hourly periods detected. Each hour should trigger one new period. Use this to verify hourly detection is working.")
+    table.cell(trackingTable, 1, row, str.tostring(debug_new_period_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, "",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Tracking Inits",
+               text_color=color.new(color.yellow, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Number of times tracking variables were initialized (should equal New Periods). If lower, check if 05 box data is missing.")
+    table.cell(trackingTable, 1, row, str.tostring(debug_tracking_init_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, "",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "Data Saves",
+               text_color=color.new(color.yellow, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Number of completed hours saved to history arrays. This should match the 'Total Hours' count if all hours were successfully tracked.")
+    table.cell(trackingTable, 1, row, str.tostring(debug_data_saved_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, "",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize)
+    row += 1
+
+    table.cell(trackingTable, 0, row, "05 Box Completions",
+               text_color=color.new(color.yellow, 0), bgcolor=tableBgColor, text_size=tblSize,
+               tooltip="Number of times the 05 box (first 5 min) completed. Should equal New Periods. Helps verify 05 box calculation is working.")
+    table.cell(trackingTable, 1, row, str.tostring(debug_05box_complete_count),
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize, text_halign=text.align_right)
+    table.cell(trackingTable, 2, row, "",
+               text_color=tableTextColor, bgcolor=tableBgColor, text_size=tblSize)
