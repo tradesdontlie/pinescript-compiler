@@ -1,19 +1,36 @@
 // Pine Script v6 string built-in functions
 
+import { NA } from '../types/na';
+
 export const str = {
   /**
    * Convert any value to its string representation.
-   * Optionally accepts a format string (e.g. "#.##" for number formatting).
+   * Optionally accepts a format string (e.g. "#.##" for number formatting)
+   * or a named format specifier ("format.mintick", "format.volume", "format.percent").
    */
   tostring(value: any, format?: string): string {
     if (value === null || value === undefined || (typeof value === 'number' && isNaN(value))) {
       return 'NaN';
     }
     if (format !== undefined && typeof value === 'number') {
+      // Named format specifiers
+      if (format === 'format.mintick') {
+        return value.toFixed(2);
+      }
+      if (format === 'format.volume') {
+        const abs = Math.abs(value);
+        if (abs >= 1e9) return (value / 1e9).toFixed(2) + 'B';
+        if (abs >= 1e6) return (value / 1e6).toFixed(2) + 'M';
+        if (abs >= 1e3) return (value / 1e3).toFixed(2) + 'K';
+        return String(Math.round(value));
+      }
+      if (format === 'format.percent') {
+        return value.toFixed(2) + '%';
+      }
       // Handle Pine-style format strings like "#.##", "0.00", etc.
-      const match = format.match(/[#0]*\.([#0]+)/);
-      if (match) {
-        const decimals = match[1].length;
+      const m = format.match(/[#0]*\.([#0]+)/);
+      if (m) {
+        const decimals = m[1].length;
         return value.toFixed(decimals);
       }
       return String(value);
@@ -99,15 +116,16 @@ export const str = {
   },
 
   /**
-   * Test if the string matches the given regex pattern.
-   * Returns true if the pattern matches anywhere in the string.
+   * Returns the first match of the regex in the string, or na if not found.
+   * Pine Script str.match returns the matched substring, not a boolean.
    */
-  match(s: string, regex: string): boolean {
-    if (s === null || s === undefined || regex === null || regex === undefined) return false;
+  match(s: string, regex: string): string | typeof NA {
+    if (s === null || s === undefined || regex === null || regex === undefined) return NA;
     try {
-      return new RegExp(regex).test(s);
+      const m = s.match(new RegExp(regex));
+      return m ? m[0] : NA;
     } catch {
-      return false;
+      return NA;
     }
   },
 
@@ -129,6 +147,15 @@ export const str = {
       const i = parseInt(idx, 10);
       return i < args.length ? String(args[i]) : `{${idx}}`;
     });
+  },
+
+  /**
+   * Repeat a string count times.
+   * Returns empty string if s is empty or count is <= 0.
+   */
+  repeat(s: string, count: number): string {
+    if (!s || count <= 0) return '';
+    return s.repeat(Math.floor(count));
   },
 
   /**

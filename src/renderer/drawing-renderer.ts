@@ -60,13 +60,12 @@ export function renderLines(
 }
 
 /**
- * Render label drawing objects as markers on a candlestick series.
+ * Collect label drawing objects as markers (does not call setMarkers).
  */
-export function renderLabels(
-  candleSeries: ISeriesApi<'Candlestick'>,
+export function collectLabelMarkers(
   labels: LabelDrawing[],
-): void {
-  const markers = labels
+): any[] {
+  return labels
     .filter(l => !l._deleted)
     .map(l => {
       const pos = mapLabelStyleToPosition(l.style);
@@ -77,9 +76,18 @@ export function renderLabels(
         shape: pos.shape as 'circle' | 'square' | 'arrowUp' | 'arrowDown',
         text: l.text || '',
       };
-    })
-    .sort((a, b) => (a.time as number) - (b.time as number));
+    });
+}
 
+/**
+ * @deprecated Use collectLabelMarkers + single setMarkers call instead.
+ */
+export function renderLabels(
+  candleSeries: ISeriesApi<'Candlestick'>,
+  labels: LabelDrawing[],
+): void {
+  const markers = collectLabelMarkers(labels)
+    .sort((a, b) => (a.time as number) - (b.time as number));
   if (markers.length > 0) {
     candleSeries.setMarkers(markers);
   }
@@ -118,7 +126,6 @@ export function renderBoxes(
 ): void {
   for (const box of boxes) {
     if (box._deleted) continue;
-    // Render each box as an area series from top to bottom between left and right
     const series = chart.addAreaSeries({
       lineColor: box.border_color || '#2962FF',
       topColor: (box.bgcolor || '#2962FF') + '40',
@@ -153,7 +160,6 @@ export function renderTables(
     el.style.fontFamily = 'monospace';
     el.style.fontSize = '11px';
 
-    // Position mapping
     const pos = table.position || 'top_right';
     if (pos.includes('top')) el.style.top = '8px';
     if (pos.includes('bottom')) el.style.bottom = '32px';
@@ -198,12 +204,11 @@ export function renderTables(
 }
 
 /**
- * Render plotshape data as markers on a candlestick series.
+ * Collect plotshape data as markers (does not call setMarkers).
  */
-export function renderPlotshapeMarkers(
-  candleSeries: ISeriesApi<'Candlestick'>,
+export function collectPlotshapeMarkers(
   plotshapes: { style: string; location: string; color: string; values: { time: number; value: number | null; text?: string }[] }[],
-): void {
+): any[] {
   const allMarkers: any[] = [];
   for (const ps of plotshapes) {
     for (const v of ps.values) {
@@ -220,9 +225,19 @@ export function renderPlotshapeMarkers(
       });
     }
   }
+  return allMarkers;
+}
+
+/**
+ * @deprecated Use collectPlotshapeMarkers + single setMarkers call instead.
+ */
+export function renderPlotshapeMarkers(
+  candleSeries: ISeriesApi<'Candlestick'>,
+  plotshapes: { style: string; location: string; color: string; values: { time: number; value: number | null; text?: string }[] }[],
+): void {
+  const allMarkers = collectPlotshapeMarkers(plotshapes);
   if (allMarkers.length > 0) {
     allMarkers.sort((a: any, b: any) => (a.time as number) - (b.time as number));
-    // Merge with existing markers
     const existing = candleSeries.markers?.() ?? [];
     candleSeries.setMarkers([...existing, ...allMarkers]);
   }
@@ -245,12 +260,11 @@ function mapShapeToMarker(shape: string): string {
 }
 
 /**
- * Render plotarrow data as markers on a candlestick series.
+ * Collect plotarrow data as markers (does not call setMarkers).
  */
-export function renderPlotarrowMarkers(
-  candleSeries: ISeriesApi<'Candlestick'>,
+export function collectPlotarrowMarkers(
   plotarrows: { colorup: string; colordown: string; values: { time: number; value: number | null }[] }[],
-): void {
+): any[] {
   const allMarkers: any[] = [];
   for (const pa of plotarrows) {
     for (const v of pa.values) {
@@ -265,6 +279,57 @@ export function renderPlotarrowMarkers(
       });
     }
   }
+  return allMarkers;
+}
+
+/**
+ * @deprecated Use collectPlotarrowMarkers + single setMarkers call instead.
+ */
+export function renderPlotarrowMarkers(
+  candleSeries: ISeriesApi<'Candlestick'>,
+  plotarrows: { colorup: string; colordown: string; values: { time: number; value: number | null }[] }[],
+): void {
+  const allMarkers = collectPlotarrowMarkers(plotarrows);
+  if (allMarkers.length > 0) {
+    allMarkers.sort((a: any, b: any) => (a.time as number) - (b.time as number));
+    const existing = candleSeries.markers?.() ?? [];
+    candleSeries.setMarkers([...existing, ...allMarkers]);
+  }
+}
+
+/**
+ * Collect plotchar data as markers (does not call setMarkers).
+ * Renders the char as the marker text label with a circle anchor shape.
+ */
+export function collectPlotcharMarkers(
+  plotchars: { char: string; location: string; color: string; values: { time: number; value: number | null; text?: string }[] }[],
+): any[] {
+  const allMarkers: any[] = [];
+  for (const pc of plotchars) {
+    for (const v of pc.values) {
+      if (v.value === null) continue;
+      const position = pc.location === 'belowbar' ? 'belowBar' :
+                       pc.location === 'abovebar' ? 'aboveBar' : 'inBar';
+      allMarkers.push({
+        time: v.time as UTCTimestamp,
+        position,
+        color: pc.color || '#2962FF',
+        shape: 'circle' as const,
+        text: pc.char || v.text || '•',
+      });
+    }
+  }
+  return allMarkers;
+}
+
+/**
+ * @deprecated Use collectPlotcharMarkers + single setMarkers call instead.
+ */
+export function renderPlotcharMarkers(
+  candleSeries: ISeriesApi<'Candlestick'>,
+  plotchars: { char: string; location: string; color: string; values: { time: number; value: number | null; text?: string }[] }[],
+): void {
+  const allMarkers = collectPlotcharMarkers(plotchars);
   if (allMarkers.length > 0) {
     allMarkers.sort((a: any, b: any) => (a.time as number) - (b.time as number));
     const existing = candleSeries.markers?.() ?? [];

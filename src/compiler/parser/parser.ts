@@ -490,7 +490,8 @@ export class Parser {
         const saved = this.pos;
         try {
           const ann = this.parseTypeAnnotation();
-          if (this.check(TokenType.IDENTIFIER)) {
+          // Accept IDENTIFIER or contextual keywords that can be param names (e.g. 'by')
+          if (this.check(TokenType.IDENTIFIER) || this.check(TokenType.BY)) {
             typeAnnotation = ann;
           } else {
             this.pos = saved;
@@ -500,7 +501,11 @@ export class Parser {
         }
       }
 
-      const nameTok = this.expect(TokenType.IDENTIFIER, 'Expected parameter name');
+      // Allow keywords to be used as parameter names (e.g. 'by' in method/function params)
+      const cur = this.peek();
+      const nameTok = (cur.type === TokenType.IDENTIFIER || cur.type === TokenType.BY)
+        ? this.advance()
+        : this.expect(TokenType.IDENTIFIER, 'Expected parameter name');
 
       let defaultValue: Expression | null = null;
       if (this.check(TokenType.ASSIGN)) {
@@ -540,8 +545,15 @@ export class Parser {
     let body: Statement[] | Expression;
     if (this.check(TokenType.ARROW)) {
       this.advance();
-      body = this.parseExpression();
-      this.consumeNewline();
+      // Pine allows `=> expr` on same line OR `=>\n  INDENT block DEDENT`
+      if (this.check(TokenType.NEWLINE)) {
+        // Multi-line method: body is an indented block
+        this.consumeNewline();
+        body = this.parseBlock();
+      } else {
+        body = this.parseExpression();
+        this.consumeNewline();
+      }
     } else {
       this.consumeNewline();
       body = this.parseBlock();
@@ -1001,6 +1013,8 @@ export class Parser {
       case TokenType.BOOL_TYPE:
       case TokenType.STRING_TYPE:
       case TokenType.INPUT:
+      // Contextual keywords that can be used as variable names
+      case TokenType.BY:
         this.advance();
         return { kind: 'IdentifierExpression', name: cur.value, loc: cur.loc } as IdentifierExpression;
 
@@ -1130,14 +1144,15 @@ export class Parser {
    * We detect non-IDENTIFIER base types (int, float, bool, string, color),
    * qualifiers (const, input, simple, series), and drawing object type names
    * (line, label, box, table) when followed by an identifier.
+   * Also handles user-defined type names (UDTs) like MyType.
    */
   private isTypeAnnotationStart(): boolean {
     const t = this.peek().type;
     if (TYPE_QUALIFIERS.has(t) || BASE_TYPE_KWS.has(t)) return true;
     // Check for drawing object type names (these are IDENTIFIER tokens)
-    if (t === TokenType.IDENTIFIER && Parser.DRAWING_TYPE_NAMES.has(this.peek().value)) {
+    if (t === TokenType.IDENTIFIER) {
       // Only if followed by another identifier (the variable name)
-      // Also handle array types: line[] myVar
+      // Also handle array types: line[] myVar, MyType[] arr
       const next = this.peekAt(1);
       if (next.type === TokenType.IDENTIFIER) return true;
       if (next.type === TokenType.LBRACKET && this.peekAt(2).type === TokenType.RBRACKET) return true;

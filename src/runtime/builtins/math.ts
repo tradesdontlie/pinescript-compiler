@@ -1,3 +1,6 @@
+import { NA, isNa } from '../types/na';
+import { Series } from '../types/series';
+
 export const math = {
   abs: Math.abs,
   ceil: Math.ceil,
@@ -15,11 +18,48 @@ export const math = {
   log10: Math.log10,
   exp: Math.exp,
   sign: Math.sign,
-  avg: (...args: number[]): number => {
-    if (args.length === 0) return 0;
-    return args.reduce((sum, v) => sum + v, 0) / args.length;
+
+  /**
+   * math.avg(...values) — variadic average; NA values are excluded from sum and count.
+   */
+  avg: (...args: (number | typeof NA)[]): number => {
+    let sum = 0;
+    let count = 0;
+    for (const v of args) {
+      if (!isNa(v)) {
+        sum += v as number;
+        count++;
+      }
+    }
+    if (count === 0) return NA as unknown as number;
+    return sum / count;
   },
-  sum: (...args: number[]): number => args.reduce((sum, v) => sum + v, 0),
+
+  /**
+   * math.sum(source, length) — rolling sum of last `length` bars.
+   * Any NA in the window propagates NA.
+   * Also supports variadic form math.sum(a, b, c) for backward compatibility.
+   */
+  sum: (sourceOrFirst: Series<number> | number, lengthOrRest?: number, ...rest: number[]): number => {
+    // If first arg is a Series, treat as rolling sum
+    if (sourceOrFirst !== null && typeof sourceOrFirst === 'object' && typeof (sourceOrFirst as any).get === 'function') {
+      const source = sourceOrFirst as Series<number>;
+      const length = lengthOrRest as number;
+      if (source.length < length) return NA as unknown as number;
+      let total = 0;
+      for (let i = 0; i < length; i++) {
+        const v = source.get(i);
+        if (isNa(v)) return NA as unknown as number;
+        total += v as number;
+      }
+      return total;
+    }
+    // Variadic numeric form: sum(a, b, c, ...)
+    let total = sourceOrFirst as number;
+    if (lengthOrRest !== undefined) total += lengthOrRest;
+    for (const v of rest) total += v;
+    return total;
+  },
 
   // Trig functions
   sin: Math.sin,

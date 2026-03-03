@@ -1,6 +1,11 @@
 // Pine Script v6 time extraction built-in functions
 // All timestamps are in milliseconds (Unix epoch).
 
+import { NA } from '../types/na';
+
+// Internal alias so it doesn't conflict with the `NA` symbol type
+const NA_SYMBOL = NA;
+
 /**
  * Extract date/time parts from a timestamp, optionally in a specific timezone.
  * When no timezone is given, UTC is used.
@@ -143,6 +148,59 @@ export function createTimeFunctions(getCurrentTime: () => number) {
       second: number = 0
     ): number {
       return Date.UTC(year, month - 1, day, hour, minute, second);
+    },
+
+    /**
+     * ISO week number of the year (1–53).
+     * ISO 8601: Week 1 contains January 4.
+     */
+    weekofyear(ts?: number, tz?: string): number {
+      const parts = getDateParts(resolveTs(ts), tz);
+      const d = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+      const dayOfYear = Math.floor(
+        (d.getTime() - Date.UTC(parts.year, 0, 0)) / 86400000
+      );
+      const dow = d.getUTCDay() || 7; // ISO: 1=Mon..7=Sun
+      return Math.floor((dayOfYear - dow + 10) / 7);
+    },
+
+    /**
+     * Returns the bar's open time (ms) if the bar falls within the given session
+     * string, otherwise returns NA.
+     *
+     * Session string format: "HHMM-HHMM" or "HHMM-HHMM:days"
+     * where days is a string of digit chars: 1=Sun, 2=Mon, ..., 7=Sat (Pine convention).
+     *
+     * @param timeframe  Timeframe string (e.g. "D") — currently unused in the check
+     * @param session    Session window, e.g. "0930-1600:23456"
+     * @param timezone   IANA timezone string, e.g. "America/New_York"
+     */
+    timeInSession(
+      timeframe?: string,
+      session?: string,
+      timezone?: string
+    ): number | symbol {
+      const ts = resolveTs(undefined);
+      if (!session) return ts;
+      const [timeRange, daysStr] = session.split(':');
+      const [startStr, endStr] = timeRange.split('-');
+      const startH = parseInt(startStr.slice(0, 2), 10);
+      const startM = parseInt(startStr.slice(2), 10);
+      const endH = parseInt(endStr.slice(0, 2), 10);
+      const endM = parseInt(endStr.slice(2), 10);
+      const parts = getDateParts(ts, timezone);
+      const barMinutes = parts.hour * 60 + parts.minute;
+      const startMinutes = startH * 60 + startM;
+      const endMinutes = endH * 60 + endM;
+      if (daysStr) {
+        const dow = parts.dayOfWeek; // 1=Sun..7=Sat (Pine)
+        if (!daysStr.includes(String(dow))) return NA_SYMBOL;
+      }
+      const inRange =
+        startMinutes <= endMinutes
+          ? barMinutes >= startMinutes && barMinutes < endMinutes
+          : barMinutes >= startMinutes || barMinutes < endMinutes;
+      return inRange ? ts : NA_SYMBOL;
     },
   };
 }

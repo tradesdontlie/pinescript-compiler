@@ -29,7 +29,10 @@ export function createEngine(bars: Bar[]): Engine {
         () => windowedBuiltins.volume
       );
 
-      const contextInternals = createContext(builtins, ta, bars.length);
+      const lastBarTime = bars.length > 0 ? bars[bars.length - 1].time : 0;
+      const executionTimenow = Date.now();
+
+      const contextInternals = createContext(builtins, ta, bars.length, lastBarTime, executionTimenow);
       const { ctx, plots, hlines, fills, bgcolors, barcolors, updateBar } = contextInternals;
 
       // Evaluate the compiled code
@@ -60,7 +63,7 @@ export function createEngine(bars: Bar[]): Engine {
       }
 
       // Create fresh context using windowed builtins for bar-by-bar execution
-      const windowedContext = createContext(windowedBuiltins, ta, bars.length);
+      const windowedContext = createContext(windowedBuiltins, ta, bars.length, lastBarTime, executionTimenow);
       const winCtx = windowedContext.ctx;
 
       // Wire request.security with full bars data
@@ -113,7 +116,11 @@ export function createEngine(bars: Bar[]): Engine {
           try {
             windowedContext.executeFn();
           } catch (e) {
-            // Continue on per-bar errors
+            // Re-throw runtime.error() calls; swallow other per-bar errors
+            if (e instanceof Error && (e as any).isRuntimeError) {
+              throw e;
+            }
+            // Continue on other per-bar errors
           }
         }
       }

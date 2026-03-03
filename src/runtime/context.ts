@@ -7,7 +7,7 @@ import { TaModule } from './builtins/ta';
 import { BarState } from './builtins/barstate';
 import { BuiltinVariables } from './builtins/variables';
 import { str } from './builtins/str';
-import { arrayModule } from './builtins/collections';
+import { arrayModule, mapModule, matrixModule } from './builtins/collections';
 import { SymInfo, createSyminfo } from './builtins/syminfo';
 import { TimeframeInfo, createTimeframe } from './builtins/timeframe';
 import { StrategyEngine, createStrategyEngine } from './builtins/strategy';
@@ -42,6 +42,10 @@ export interface RuntimeContext {
   hlc3: number;
   ohlc4: number;
 
+  // Last bar info (set before bar loop)
+  last_bar_index: number;
+  last_bar_time: number;
+
   // Series accessor
   series(name: string): Series<number>;
 
@@ -52,6 +56,8 @@ export interface RuntimeContext {
   barstate: BarState;
   str: typeof str;
   array: typeof arrayModule;
+  map: typeof mapModule;
+  matrix: typeof matrixModule;
   syminfo: SymInfo;
   timeframe: TimeframeInfo;
 
@@ -72,12 +78,26 @@ export interface RuntimeContext {
   month(ts?: number, tz?: string): number;
   year(ts?: number, tz?: string): number;
   timestamp(year: number, month: number, day: number, hour?: number, minute?: number, second?: number): number;
+  weekofyear(ts?: number, tz?: string): number;
+  timeInSession(timeframe?: string, session?: string, timezone?: string): number | symbol;
 
   // Request module
   request: { security: (...args: any[]) => any };
 
-  // Ticker module (stub)
+  // Ticker module
   ticker: { new: (...args: any[]) => string };
+
+  // Session module
+  session: {
+    ismarket: boolean;
+    ispremarket: boolean;
+    ispostmarket: boolean;
+  };
+
+  // Runtime module
+  runtime: {
+    error: (message: string) => never;
+  };
 
   // State storage
   state: Record<string, unknown>;
@@ -145,10 +165,48 @@ export interface ContextInternals {
   updateBar(barIdx: number, builtins: BuiltinVariables, lastIndex: number): void;
 }
 
+/**
+ * Parse session state for a bar timestamp.
+ * Regular market hours: 09:30 - 16:00 Eastern Time (NYSE/NASDAQ default).
+ * Pre-market: 04:00 - 09:30
+ * Post-market: 16:00 - 20:00
+ */
+function parseSessionState(barTimeMs: number, _timezone: string): { ismarket: boolean; ispremarket: boolean; ispostmarket: boolean } {
+  // Get hour and minute in Eastern Time (ET, UTC-5/UTC-4)
+  // We use a simple offset: EST = UTC-5, EDT = UTC-4. Use approximate UTC-5 for simplicity.
+  // For proper TZ support, we convert using Intl.DateTimeFormat.
+  const date = new Date(barTimeMs);
+  const etFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+  });
+  const parts = etFormatter.formatToParts(date);
+  const hourPart = parts.find(p => p.type === 'hour');
+  const minPart = parts.find(p => p.type === 'minute');
+  const hour = parseInt(hourPart?.value ?? '0', 10);
+  const minute = parseInt(minPart?.value ?? '0', 10);
+  const timeMinutes = hour * 60 + minute;
+
+  const marketOpen = 9 * 60 + 30;   // 09:30
+  const marketClose = 16 * 60;       // 16:00
+  const preOpen = 4 * 60;            // 04:00
+  const postClose = 20 * 60;         // 20:00
+
+  const ismarket = timeMinutes >= marketOpen && timeMinutes < marketClose;
+  const ispremarket = timeMinutes >= preOpen && timeMinutes < marketOpen;
+  const ispostmarket = timeMinutes >= marketClose && timeMinutes < postClose;
+
+  return { ismarket, ispremarket, ispostmarket };
+}
+
 export function createContext(
   builtins: BuiltinVariables,
   ta: TaModule,
-  barsCount: number
+  barsCount: number,
+  lastBarTime: number = 0,
+  executionTimenow: number = Date.now()
 ): ContextInternals {
   const state: Record<string, unknown> = {};
   const persistentState: Record<string, unknown> = {};
@@ -187,8 +245,10 @@ export function createContext(
     get volume() { return builtins.volume as any; },
     get time() { return builtins.time.get(0); },
     get time_close() { return builtins.time.get(0); }, // approximation: same as time for now
-    get timenow() { return Date.now(); },
+    timenow: executionTimenow,
     get bar_index() { return currentBarIndex; },
+    get last_bar_index() { return lastIndex; },
+    last_bar_time: lastBarTime,
     get hl2() { return builtins.hl2 as any; },
     get hlc3() { return builtins.hlc3 as any; },
     get ohlc4() { return builtins.ohlc4 as any; },
@@ -203,6 +263,8 @@ export function createContext(
     color,
     str,
     array: arrayModule,
+    map: mapModule,
+    matrix: matrixModule,
     syminfo: createSyminfo(),
     timeframe: createTimeframe(),
 
@@ -221,16 +283,33 @@ export function createContext(
     month: timeFns.month,
     year: timeFns.year,
     timestamp: timeFns.timestamp,
+    weekofyear: timeFns.weekofyear,
+    timeInSession: timeFns.timeInSession,
 
     // Request module (stub — will be fully wired from engine)
     request: {
       security(..._args: any[]): any { return NA; },
     },
 
-    // Ticker module (stub)
+    // Ticker module
     ticker: {
       new(...args: any[]): string {
         return args.length >= 2 ? `${args[0]}:${args[1]}` : String(args[0] ?? '');
+      },
+    },
+
+    // Session module — check current bar time against regular market hours
+    get session() {
+      const barTime = builtins.time.get(0);
+      return parseSessionState(barTime, 'America/New_York');
+    },
+
+    // Runtime module
+    runtime: {
+      error(message: string): never {
+        const err = new Error(message);
+        (err as any).isRuntimeError = true;
+        throw err;
       },
     },
 

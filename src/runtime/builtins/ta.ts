@@ -35,6 +35,11 @@ const supertrendState = new Map<string, {
 }>();
 const crossoverState = new Map<string, number>();
 const crossunderState = new Map<string, number>();
+const hmaState = new Map<string, {
+  deltaBuf: number[];
+  capacity: number;
+  prevBarIndex: number;
+}>();
 
 function calcSma(source: Series<number>, length: number): number {
   if (source.length < length) return NA as unknown as number;
@@ -115,6 +120,13 @@ export interface TaModule {
   mfi(series: Series<number>, length: number, high?: Series<number>, low?: Series<number>, close?: Series<number>, volume?: Series<number>, id?: string): number;
   obv(close?: Series<number>, volume?: Series<number>, id?: string): number;
   supertrend(factor: number, atrPeriod: number, high?: Series<number>, low?: Series<number>, close?: Series<number>, id?: string): [number, number];
+
+  // P1 additions
+  hma(source: Series<number>, length: number, id?: string): number;
+  kc(source: Series<number>, length: number, mult: number, useTrueRange?: boolean, id?: string): [number, number, number];
+  donchian(length: number, high?: Series<number>, low?: Series<number>): [number, number, number];
+  linreg(source: Series<number>, length: number, offset?: number): number;
+  median(source: Series<number>, length: number): number;
 }
 
 export function createTaModule(
@@ -1220,6 +1232,186 @@ export function createTaModule(
       state.prevBarIndex = barIndex;
 
       return [supertrend, direction];
+    },
+
+    // ========================================================================
+    // P1 TA FUNCTIONS
+    // ========================================================================
+
+    /**
+     * ta.hma(source, length)
+     * Hull Moving Average: WMA(2*WMA(src, length/2) - WMA(src, length), floor(sqrt(length)))
+     */
+    hma(source: Series<number>, length: number, id: string = 'default_hma'): number {
+      if (source.length < length) return NA as unknown as number;
+
+      const halfLen = Math.floor(length / 2);
+      const sqrtLen = Math.floor(Math.sqrt(length));
+
+      // Compute wma1 (half-length) and wma2 (full-length) inline
+      let ws1 = 0, wn1 = 0, ws2 = 0, wn2 = 0;
+      for (let i = 0; i < length; i++) {
+        const v = source.get(i);
+        if (isNa(v)) return NA as unknown as number;
+        const w2 = length - i;
+        ws2 += (v as number) * w2;
+        wn2 += w2;
+        if (i < halfLen) {
+          const w1 = halfLen - i;
+          ws1 += (v as number) * w1;
+          wn1 += w1;
+        }
+      }
+      if (wn1 === 0 || wn2 === 0) return NA as unknown as number;
+      const delta = 2 * (ws1 / wn1) - (ws2 / wn2);
+
+      // Accumulate delta in ring buffer
+      const barIndex = getCurrentBarIndex();
+      let state = hmaState.get(id);
+      if (!state || state.capacity !== sqrtLen) {
+        state = { deltaBuf: [], capacity: sqrtLen, prevBarIndex: barIndex };
+        hmaState.set(id, state);
+      }
+      state.deltaBuf.unshift(delta);
+      if (state.deltaBuf.length > sqrtLen) state.deltaBuf.length = sqrtLen;
+      state.prevBarIndex = barIndex;
+
+      if (state.deltaBuf.length < sqrtLen) return NA as unknown as number;
+
+      // WMA over delta buffer
+      let wSum = 0, wN = 0;
+      for (let i = 0; i < sqrtLen; i++) {
+        const w = sqrtLen - i;
+        wSum += state.deltaBuf[i] * w;
+        wN += w;
+      }
+      return wSum / wN;
+    },
+
+    /**
+     * ta.kc(source, length, mult, useTrueRange?)
+     * Keltner Channels. Returns [upper, basis, lower].
+     * basis = EMA(source, length)
+     * range = ATR(1) if useTrueRange, else EMA(high-low, length)
+     */
+    kc(
+      source: Series<number>,
+      length: number,
+      mult: number,
+      useTrueRange: boolean = true,
+      id: string = 'default_kc'
+    ): [number, number, number] {
+      const NA3: [number, number, number] = [NA as unknown as number, NA as unknown as number, NA as unknown as number];
+
+      const h = getHigh ? getHigh() : undefined;
+      const l = getLow ? getLow() : undefined;
+      const c = getClose ? getClose() : undefined;
+      if (!h || !l || !c) return NA3;
+
+      // basis EMA
+      const basisId = id + '_basis';
+      const basis = this.ema(source, length, basisId);
+      if (isNa(basis)) return NA3;
+
+      let rangeVal: number;
+      if (useTrueRange) {
+        rangeVal = this.atr(length, h, l, c, id + '_atr');
+      } else {
+        // EMA of (high - low) using stateful EMA
+        const curHigh = h.get(0);
+        const curLow = l.get(0);
+        if (isNa(curHigh) || isNa(curLow)) return NA3;
+        const curr = (curHigh as number) - (curLow as number);
+        const rangeId = id + '_range';
+        const barIndex = getCurrentBarIndex();
+        const rangeState = emaState.get(rangeId);
+        if (!rangeState || rangeState.prevBarIndex !== barIndex - 1) {
+          emaState.set(rangeId, { prev: curr, prevBarIndex: barIndex });
+          rangeVal = curr;
+        } else {
+          const k = 2 / (length + 1);
+          rangeVal = curr * k + (rangeState.prev as number) * (1 - k);
+          emaState.set(rangeId, { prev: rangeVal, prevBarIndex: barIndex });
+        }
+      }
+      if (isNa(rangeVal)) return NA3;
+
+      const upper = (basis as number) + mult * rangeVal;
+      const lower = (basis as number) - mult * rangeVal;
+      return [upper, basis as number, lower];
+    },
+
+    /**
+     * ta.donchian(length)
+     * Donchian Channels. Returns [upper, basis, lower].
+     * upper = highest(high, length), lower = lowest(low, length), basis = (upper+lower)/2
+     */
+    donchian(
+      length: number,
+      high?: Series<number>,
+      low?: Series<number>
+    ): [number, number, number] {
+      const NA3: [number, number, number] = [NA as unknown as number, NA as unknown as number, NA as unknown as number];
+      const h = high ? high : (getHigh ? getHigh() : undefined);
+      const l = low ? low : (getLow ? getLow() : undefined);
+      if (!h || !l) return NA3;
+
+      const upper = this.highest(h, length);
+      const lower = this.lowest(l, length);
+      if (isNa(upper) || isNa(lower)) return NA3;
+
+      const basis = ((upper as number) + (lower as number)) / 2;
+      return [upper as number, basis, lower as number];
+    },
+
+    /**
+     * ta.linreg(source, length, offset)
+     * Least-squares linear regression value.
+     * Returns the fitted value at `offset` bars back from most recent.
+     */
+    linreg(source: Series<number>, length: number, offset: number = 0): number {
+      if (source.length < length + offset) return NA as unknown as number;
+
+      let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+      for (let i = 0; i < length; i++) {
+        const x = i; // 0 = oldest in window
+        const v = source.get(length - 1 - i + offset); // oldest first
+        if (isNa(v)) return NA as unknown as number;
+        sumX += x;
+        sumY += v as number;
+        sumXY += x * (v as number);
+        sumX2 += x * x;
+      }
+
+      const denom = length * sumX2 - sumX * sumX;
+      if (denom === 0) return sumY / length;
+
+      const slope = (length * sumXY - sumX * sumY) / denom;
+      const intercept = (sumY - slope * sumX) / length;
+
+      // Value at the most recent end of the regression line
+      return intercept + slope * (length - 1);
+    },
+
+    /**
+     * ta.median(source, length)
+     * Median value over `length` bars.
+     * For even-length: returns the lower of the two middle values.
+     */
+    median(source: Series<number>, length: number): number {
+      if (source.length < length) return NA as unknown as number;
+
+      const vals: number[] = [];
+      for (let i = 0; i < length; i++) {
+        const v = source.get(i);
+        if (isNa(v)) return NA as unknown as number;
+        vals.push(v as number);
+      }
+
+      vals.sort((a, b) => a - b);
+      const mid = Math.floor(length / 2);
+      // Pine uses lower middle for even-length
+      return length % 2 === 1 ? vals[mid] : vals[mid - 1];
     },
   };
 }

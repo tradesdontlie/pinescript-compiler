@@ -1,104 +1,62 @@
-import { IChartApi, ISeriesApi } from 'lightweight-charts';
+import { IChartApi } from 'lightweight-charts';
 import { Bar } from '../data/types';
-import { ScriptMetadata } from '../compiler/index';
+import { ExecutionResult } from '../runtime/index';
 import { createChart } from './chart-manager';
-import { renderCandlesticks } from './candlestick-renderer';
-import { renderPlot } from './series-renderer';
+import { renderSingleChart } from './single-pane';
+import { renderMultiPane } from './multi-pane';
 
-// Runtime result interfaces — defined here until runtime package is written
-export interface ExecutionResult {
-  metadata: ScriptMetadata | null;
-  plots: PlotData[];
-  hlines: HlineData[];
-  fills: FillData[];
-  bgcolors: BgColorData[];
-  barcolors: BarColorData[];
-}
+// Re-export runtime types for downstream consumers
+export type {
+  ExecutionResult,
+  PlotData,
+  HlineData,
+  FillData,
+  BgColorData,
+  BarColorData,
+  PlotShapeData,
+  PlotCharData,
+  PlotArrowData,
+  PlotCandleData,
+  PlotBarData,
+} from '../runtime/index';
 
-export interface PlotData {
-  index: number;
-  title: string;
-  color: string;
-  linewidth: number;
-  style: string;
-  values: { time: number; value: number | null }[];
-}
+// Re-export renderSingleChart for multi-pane and other consumers
+export { renderSingleChart } from './single-pane';
 
-export interface HlineData {
-  index: number;
-  price: number;
-  title: string;
-  color: string;
-}
-
-export interface FillData {
-  plot1: number;
-  plot2: number;
-  color: string;
-}
-
-export interface BgColorData {
-  time: number;
-  color: string;
-}
-
-export interface BarColorData {
-  time: number;
-  color: string;
-}
-
-// Tracks the active chart so we can destroy it before re-rendering
-let activeChart: IChartApi | null = null;
+// Tracks the active chart(s) so we can destroy them before re-rendering
+let activeCharts: IChartApi[] = [];
 
 export function renderResults(
   container: HTMLElement,
   bars: Bar[],
   results: ExecutionResult
 ): void {
-  // Destroy previous chart if any
-  if (activeChart) {
-    activeChart.remove();
-    activeChart = null;
+  // Destroy previous charts
+  for (const c of activeCharts) {
+    c.remove();
   }
+  activeCharts = [];
   container.innerHTML = '';
 
   const overlay = results.metadata?.overlay ?? true;
-  const chart = createChart(container);
-  activeChart = chart;
+  const hasNonOverlayPlots = results.plots.length > 0 && !overlay;
 
-  // Always render candlesticks
-  const candleSeries = renderCandlesticks(chart, bars);
-
-  // Render plots
-  const plotSeriesMap = new Map<number, ISeriesApi<'Line'> | ISeriesApi<'Histogram'> | ISeriesApi<'Area'>>();
-  for (const plotData of results.plots) {
-    const priceScaleId = overlay ? 'right' : `plot-${plotData.index}`;
-    const series = renderPlot(chart, plotData, priceScaleId);
-    plotSeriesMap.set(plotData.index, series as any);
+  if (hasNonOverlayPlots) {
+    // Multi-pane path: candlesticks on top, indicator below
+    const charts = renderMultiPane(container, bars, results);
+    activeCharts = charts;
+  } else {
+    // Single chart path
+    const chart = createChart(container);
+    activeCharts = [chart];
+    renderSingleChart(chart, container, bars, results, 'right');
   }
-
-  // Render horizontal lines as price lines on the candlestick series
-  if (results.hlines.length > 0) {
-    for (const hline of results.hlines) {
-      candleSeries.createPriceLine({
-        price: hline.price,
-        color: hline.color || '#888888',
-        lineWidth: 1,
-        lineStyle: 2, // Dashed
-        axisLabelVisible: true,
-        title: hline.title,
-      });
-    }
-  }
-
-  chart.timeScale().fitContent();
-  void plotSeriesMap; // suppress unused warning until fills are wired
 }
 
 export function clearChart(container: HTMLElement): void {
-  if (activeChart) {
-    activeChart.remove();
-    activeChart = null;
+  for (const c of activeCharts) {
+    c.remove();
   }
+  activeCharts = [];
   container.innerHTML = '';
 }

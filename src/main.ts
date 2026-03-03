@@ -32,15 +32,7 @@ let barCountLabel: HTMLElement;
 // Runtime execution
 // ---------------------------------------------------------------------------
 function executeRuntime(code: string, bars: Bar[]): ExecutionResult {
-  const result = createRuntime(code, bars);
-  return {
-    metadata: result.metadata ?? null,
-    plots: result.plots,
-    hlines: result.hlines,
-    fills: result.fills,
-    bgcolors: result.bgcolors,
-    barcolors: result.barcolors,
-  };
+  return createRuntime(code, bars);
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +87,9 @@ async function handleFileUpload(file: File): Promise<void> {
     currentBars = bars;
     updateSymbolInfo(file.name.replace(/\.[^.]+$/, ''), bars.length);
     renderResults(chartContainer, currentBars, {
-      metadata: null, plots: [], hlines: [], fills: [], bgcolors: [], barcolors: [],
+      metadata: { type: 'indicator', title: '', shorttitle: '', overlay: true, inputs: [], plots: [] },
+      plots: [], hlines: [], fills: [], bgcolors: [], barcolors: [],
+      plotshapes: [], plotchars: [], plotarrows: [], plotcandles: [], plotbars: [],
     });
     setStatus(`Loaded ${bars.length} bars from ${file.name}`, 'success');
   } catch (e) {
@@ -156,7 +150,9 @@ function boot(): void {
   // Initial chart render with sample data
   updateSymbolInfo('AAPL', currentBars.length);
   renderResults(chartContainer, currentBars, {
-    metadata: null, plots: [], hlines: [], fills: [], bgcolors: [], barcolors: [],
+    metadata: { type: 'indicator', title: '', shorttitle: '', overlay: true, inputs: [], plots: [] },
+    plots: [], hlines: [], fills: [], bgcolors: [], barcolors: [],
+    plotshapes: [], plotchars: [], plotarrows: [], plotcandles: [], plotbars: [],
   });
   setStatus('Ready — load data or compile a script', 'info');
 

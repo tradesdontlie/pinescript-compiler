@@ -378,4 +378,154 @@ export const arrayModule = {
     if (std === 0) return arr.map(() => 0);
     return arr.map(v => (v - mean) / std);
   },
+
+  /** Return sorted indices without modifying the original array. */
+  sortIndices(arr: any[], order?: string): number[] {
+    const dir = order === 'desc' ? -1 : 1;
+    return arr.map((_, i) => i).sort((a, b) => {
+      if (arr[a] < arr[b]) return -1 * dir;
+      if (arr[a] > arr[b]) return 1 * dir;
+      return 0;
+    });
+  },
+};
+
+// ─── Map Module ──────────────────────────────────────────────────────────────
+
+export const mapModule = {
+  /** Create a new map. */
+  new<K = any, V = any>(): Map<K, V> {
+    return new Map<K, V>();
+  },
+
+  /** Put a key-value pair into the map. Returns the previous value if the key existed. */
+  put<K, V>(m: Map<K, V>, key: K, val: V): V | undefined {
+    const prev = m.get(key);
+    m.set(key, val);
+    return prev;
+  },
+
+  /** Get the value associated with the key, or undefined. */
+  get<K, V>(m: Map<K, V>, key: K): V | undefined {
+    return m.get(key);
+  },
+
+  /** Check if the map contains the given key. */
+  contains<K>(m: Map<K, any>, key: K): boolean {
+    return m.has(key);
+  },
+
+  /** Remove the key-value pair. Returns the removed value. */
+  remove<K, V>(m: Map<K, V>, key: K): V | undefined {
+    const v = m.get(key);
+    m.delete(key);
+    return v;
+  },
+
+  /** Remove all key-value pairs from the map. */
+  clear(m: Map<any, any>): void {
+    m.clear();
+  },
+
+  /** Return the number of key-value pairs. */
+  size(m: Map<any, any>): number {
+    return m.size;
+  },
+
+  /** Return an array of all keys. */
+  keys<K>(m: Map<K, any>): K[] {
+    return Array.from(m.keys());
+  },
+
+  /** Return an array of all values. */
+  values<V>(m: Map<any, V>): V[] {
+    return Array.from(m.values());
+  },
+};
+
+// ─── Matrix Module ───────────────────────────────────────────────────────────
+
+/** Internal matrix representation: 2D array with row/col metadata. */
+export interface PineMatrix<T = any> {
+  data: T[][];
+  rows: number;
+  cols: number;
+}
+
+export const matrixModule = {
+  /** Create a new matrix with given rows, cols, and fill value. */
+  new<T = number>(rows: number, cols: number, val?: T): PineMatrix<T> {
+    const defaultVal = (val !== undefined ? val : 0) as T;
+    const data: T[][] = [];
+    for (let r = 0; r < rows; r++) {
+      data.push(new Array(cols).fill(defaultVal));
+    }
+    return { data, rows, cols };
+  },
+
+  /** Get the value at (row, col). */
+  get<T>(m: PineMatrix<T>, row: number, col: number): T | undefined {
+    if (row < 0 || row >= m.rows || col < 0 || col >= m.cols) return undefined;
+    return m.data[row][col];
+  },
+
+  /** Set the value at (row, col). */
+  set<T>(m: PineMatrix<T>, row: number, col: number, val: T): void {
+    if (row >= 0 && row < m.rows && col >= 0 && col < m.cols) {
+      m.data[row][col] = val;
+    }
+  },
+
+  /** Return the number of rows. */
+  rows<T>(m: PineMatrix<T>): number {
+    return m.rows;
+  },
+
+  /** Return the number of columns. */
+  columns<T>(m: PineMatrix<T>): number {
+    return m.cols;
+  },
+
+  /** Add a row at the given index. vals may be an array of values or a single fill value. */
+  addRow<T>(m: PineMatrix<T>, idx: number, vals?: T | T[]): void {
+    const newRow: T[] = Array.isArray(vals)
+      ? vals.slice(0, m.cols)
+      : new Array(m.cols).fill(vals !== undefined ? vals : 0);
+    // Pad if needed
+    while (newRow.length < m.cols) newRow.push((vals !== undefined ? vals : 0) as T);
+    const clampedIdx = Math.max(0, Math.min(idx, m.rows));
+    m.data.splice(clampedIdx, 0, newRow);
+    m.rows++;
+  },
+
+  /** Add a column at the given index. vals may be an array of values or a single fill value. */
+  addCol<T>(m: PineMatrix<T>, idx: number, vals?: T | T[]): void {
+    const clampedIdx = Math.max(0, Math.min(idx, m.cols));
+    for (let r = 0; r < m.rows; r++) {
+      const v: T = Array.isArray(vals)
+        ? (vals[r] !== undefined ? vals[r] : (0 as unknown as T))
+        : (vals !== undefined ? vals : 0 as unknown as T);
+      m.data[r].splice(clampedIdx, 0, v);
+    }
+    m.cols++;
+  },
+
+  /** Remove a row at the given index. Returns the removed row. */
+  removeRow<T>(m: PineMatrix<T>, idx: number): T[] | undefined {
+    if (idx < 0 || idx >= m.rows) return undefined;
+    const removed = m.data.splice(idx, 1)[0];
+    m.rows--;
+    return removed;
+  },
+
+  /** Remove a column at the given index. Returns the removed column values. */
+  removeCol<T>(m: PineMatrix<T>, idx: number): T[] | undefined {
+    if (idx < 0 || idx >= m.cols) return undefined;
+    const removed: T[] = [];
+    for (let r = 0; r < m.rows; r++) {
+      removed.push(m.data[r].splice(idx, 1)[0]);
+    }
+    m.cols--;
+    return removed;
+  },
 };

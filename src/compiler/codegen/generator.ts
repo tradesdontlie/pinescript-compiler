@@ -4,6 +4,7 @@ import { FunctionMapper, COLOR_CONSTANTS } from './function-mapper';
 import {
   Program, Statement, Expression,
   VariableDeclaration, FunctionDeclaration,
+  TypeDeclaration, MethodDeclaration,
   IfStatement, ForStatement, ForInStatement, WhileStatement,
   SwitchStatement, ReturnStatement,
   ExpressionStatement, AssignmentStatement,
@@ -40,6 +41,12 @@ export class CodeGenerator {
 
   // Phase 3: Track variable types for method dispatch (name -> inferred namespace)
   private varTypes: Map<string, string> = new Map();
+
+  // UDT support: track declared type names and their field order
+  private udtTypes: Set<string> = new Set();
+  private udtFieldOrder: Map<string, string[]> = new Map();
+  // UDT methods: track user-defined method names (methodName -> thisType)
+  private udtMethods: Map<string, string> = new Map();
 
   // Counters for plot/hline indices
   private plotIndex = 0;
@@ -93,6 +100,11 @@ export class CodeGenerator {
     this.historyVars = new Set();
     this.varTypes = new Map();
 
+    // Reset UDT state
+    this.udtTypes = new Set();
+    this.udtFieldOrder = new Map();
+    this.udtMethods = new Map();
+
     // First pass: extract metadata and collect var/varip declarations
     this.firstPass(program);
 
@@ -136,6 +148,17 @@ export class CodeGenerator {
 
   private firstPass(program: Program): void {
     for (const stmt of program.body) {
+      // Pre-register UDT type names so they're available for constructor detection
+      if (stmt.kind === 'TypeDeclaration') {
+        const td = stmt as TypeDeclaration;
+        this.udtTypes.add(td.name);
+        this.udtFieldOrder.set(td.name, td.fields.map(f => f.name));
+      }
+      // Pre-register method names
+      if (stmt.kind === 'MethodDeclaration') {
+        const md = stmt as MethodDeclaration;
+        this.udtMethods.set(md.name, md.thisType);
+      }
       if (stmt.kind === 'ExpressionStatement') {
         const expr = (stmt as ExpressionStatement).expression;
         if (expr.kind === 'CallExpression') {
@@ -240,6 +263,11 @@ export class CodeGenerator {
     if (calleeName === 'table.new') return 'table';
     if (calleeName === 'map.new') return 'map';
     if (calleeName === 'matrix.new') return 'matrix';
+    // UDT constructor: TypeName.new(...)
+    if (calleeName.endsWith('.new')) {
+      const typeName = calleeName.slice(0, -4);
+      if (this.udtTypes.has(typeName)) return typeName;
+    }
     return null;
   }
 
@@ -321,7 +349,13 @@ export class CodeGenerator {
       case 'ContinueStatement':
         out.push(this.indent() + 'continue;');
         break;
-      // Skip TypeDeclaration, MethodDeclaration, EnumDeclaration, ImportStatement, ExportStatement
+      case 'TypeDeclaration':
+        this.genTypeDecl(stmt as TypeDeclaration, out);
+        break;
+      case 'MethodDeclaration':
+        this.genMethodDecl(stmt as MethodDeclaration, out);
+        break;
+      // Skip EnumDeclaration, ImportStatement, ExportStatement
       default:
         break;
     }
@@ -398,6 +432,77 @@ export class CodeGenerator {
     }
     this.indentLevel--;
     out.push(this.indent() + '}');
+  }
+
+  private genTypeDecl(decl: TypeDeclaration, out: string[]): void {
+    const name = decl.name;
+    // Register in case firstPass missed it (shouldn't happen, but be safe)
+    this.udtTypes.add(name);
+    this.udtFieldOrder.set(name, decl.fields.map(f => f.name));
+
+    // Constructor function
+    out.push(this.indent() + `function ${name}(fields) {`);
+    this.indentLevel++;
+    out.push(this.indent() + 'fields = fields || {};');
+    for (const field of decl.fields) {
+      const defVal = field.defaultValue
+        ? this.genExpr(field.defaultValue)
+        : this.defaultForType(field.typeAnnotation.baseType);
+      out.push(this.indent() +
+        `this.${field.name} = (fields.${field.name} !== undefined) ? fields.${field.name} : ${defVal};`
+      );
+    }
+    this.indentLevel--;
+    out.push(this.indent() + '}');
+
+    // Static .new() factory
+    out.push(this.indent() + `${name}.new = function(fields) { return new ${name}(fields || {}); };`);
+  }
+
+  private defaultForType(baseType: string): string {
+    switch (baseType) {
+      case 'float': return '__rt.na';
+      case 'int':   return '__rt.na';
+      case 'bool':  return 'false';
+      case 'string': return '__rt.na';
+      case 'color':  return '__rt.na';
+      default:       return 'null'; // nested UDT or unknown
+    }
+  }
+
+  private genMethodDecl(decl: MethodDeclaration, out: string[]): void {
+    const typeName = decl.thisType;
+    // params already excludes the self/this param (parser slices params[1:])
+    const params = decl.params.map(p => p.name).join(', ');
+
+    out.push(this.indent() + `${typeName}.prototype.${decl.name} = function(${params}) {`);
+    this.indentLevel++;
+    out.push(this.indent() + 'var self = this;');
+    if (Array.isArray(decl.body)) {
+      this.generateBody(decl.body, out);
+    } else {
+      out.push(this.indent() + `return ${this.genExpr(decl.body)};`);
+    }
+    this.indentLevel--;
+    out.push(this.indent() + '};');
+  }
+
+  private genUdtConstructor(typeName: string, call: CallExpression): string {
+    const fieldNames = this.udtFieldOrder.get(typeName) ?? [];
+    const parts: string[] = [];
+
+    for (let i = 0; i < call.args.length; i++) {
+      const arg = call.args[i];
+      const key = arg.name ?? fieldNames[i];
+      if (key !== undefined) {
+        parts.push(`${key}: ${this.genExpr(arg.value)}`);
+      } else {
+        // Positional arg without field name mapping — emit as positional-ish
+        parts.push(this.genExpr(arg.value));
+      }
+    }
+
+    return `${typeName}.new({${parts.join(', ')}})`;
   }
 
   private genAssignment(stmt: AssignmentStatement, out: string[]): void {
@@ -680,7 +785,9 @@ export class CodeGenerator {
     // input() handling
     if (calleeName === 'input' || calleeName === 'input.int' || calleeName === 'input.float' ||
         calleeName === 'input.bool' || calleeName === 'input.string' || calleeName === 'input.source' ||
-        calleeName === 'input.color' || calleeName === 'input.timeframe') {
+        calleeName === 'input.color' || calleeName === 'input.timeframe' ||
+        calleeName === 'input.session' || calleeName === 'input.symbol' || calleeName === 'input.price' ||
+        calleeName === 'input.text_area') {
       return this.genInputCall(call);
     }
 
@@ -747,6 +854,17 @@ export class CodeGenerator {
       return args ? `__rt.isNa(${args})` : '__rt.na';
     }
 
+    // UDT constructor call: TypeName.new(...)
+    if (call.callee.kind === 'MemberExpression') {
+      const mem = call.callee as MemberExpression;
+      if (mem.property === 'new' && mem.object.kind === 'IdentifierExpression') {
+        const typeName = (mem.object as IdentifierExpression).name;
+        if (this.udtTypes.has(typeName)) {
+          return this.genUdtConstructor(typeName, call);
+        }
+      }
+    }
+
     // Check color constant function-like (rarely used)
 
     // Try to map to runtime
@@ -791,6 +909,15 @@ export class CodeGenerator {
         const objName = (mem.object as IdentifierExpression).name;
         if (!KNOWN_NAMESPACES.has(objName)) {
           const method = mem.property;
+
+          // Check if this is a UDT method call — emit as direct prototype method call
+          const objVarType = this.varTypes.get(objName);
+          if ((objVarType && this.udtTypes.has(objVarType)) || this.udtMethods.has(method)) {
+            const objExpr = this.genExpr(mem.object);
+            const argsStr = call.args.length > 0 ? this.genArgs(call.args) : '';
+            return `${objExpr}.${method}(${argsStr})`;
+          }
+
           // Determine the namespace from tracked type or method name
           let ns = this.varTypes.get(objName) ?? null;
           if (!ns) {
@@ -804,8 +931,15 @@ export class CodeGenerator {
               'every', 'some', 'fill', 'covariance', 'mode', 'percentile_linear_interpolation',
               'percentile_nearest_rank', 'percentrank', 'standardize',
             ]);
+            const mapMethods = new Set([
+              'put', 'contains', 'keys', 'values',
+            ]);
+            const matrixMethods = new Set([
+              'rows', 'columns', 'add_row', 'add_col', 'remove_row', 'remove_col',
+              'transpose', 'reshape', 'row', 'col', 'submatrix',
+            ]);
             const drawingMethods = new Set([
-              'delete', 'copy', 'set_x1', 'set_y1', 'set_x2', 'set_y2',
+              'delete', 'set_x1', 'set_y1', 'set_x2', 'set_y2',
               'set_xy1', 'set_xy2', 'set_xloc', 'set_yloc', 'set_extend',
               'set_color', 'set_style', 'set_width', 'set_text', 'set_tooltip',
               'set_textcolor', 'set_size', 'set_textalign',
@@ -819,7 +953,7 @@ export class CodeGenerator {
               'get_left', 'get_top', 'get_right', 'get_bottom',
             ]);
             const tableMethods = new Set([
-              'cell', 'merge_cells', 'clear', 'set_position',
+              'cell', 'merge_cells', 'set_position',
               'set_frame_color', 'set_frame_width',
               'cell_set_text', 'cell_set_bgcolor', 'cell_set_text_color',
               'cell_set_text_size', 'cell_set_text_halign', 'cell_set_text_valign',
@@ -827,6 +961,13 @@ export class CodeGenerator {
             ]);
             if (arrayMethods.has(method)) ns = 'array';
             else if (tableMethods.has(method)) ns = 'table';
+            else if (mapMethods.has(method)) {
+              // Map methods - use tracked type if available
+              ns = this.varTypes.get(objName) === 'map' ? 'map' : null;
+            }
+            else if (matrixMethods.has(method)) {
+              ns = this.varTypes.get(objName) === 'matrix' ? 'matrix' : null;
+            }
             else if (drawingMethods.has(method)) ns = null; // can't disambiguate without type
           }
           if (ns) {
@@ -858,6 +999,10 @@ export class CodeGenerator {
     else if (calleeName === 'input.color') type = 'color';
     else if (calleeName === 'input.source') type = 'source';
     else if (calleeName === 'input.timeframe') type = 'timeframe';
+    else if (calleeName === 'input.session') type = 'session';
+    else if (calleeName === 'input.symbol') type = 'symbol';
+    else if (calleeName === 'input.price') type = 'price';
+    else if (calleeName === 'input.text_area') type = 'text_area';
 
     for (const arg of call.args) {
       if (arg.name === null && defaultValue === undefined) {

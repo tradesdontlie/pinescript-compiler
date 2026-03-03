@@ -69,6 +69,20 @@ export const BUILTIN_FUNCTIONS: Record<string, string | null> = {
   'ta.obv': '__rt.ta.obv',
   'ta.supertrend': '__rt.ta.supertrend',
 
+  // P1 ta.* additions
+  'ta.hma':      '__rt.ta.hma',
+  'ta.kc':       '__rt.ta.kc',
+  'ta.donchian': '__rt.ta.donchian',
+  'ta.linreg':   '__rt.ta.linreg',
+  'ta.median':   '__rt.ta.median',
+  'ta.sar':      '__rt.ta.sar',
+  'ta.tsi':      '__rt.ta.tsi',
+  'ta.percentile_linear_interpolation': '__rt.ta.percentileLinearInterpolation',
+  'ta.percentile_nearest_rank':         '__rt.ta.percentileNearestRank',
+  'ta.williamsr':  '__rt.ta.williamsr',
+  'ta.cmo':        '__rt.ta.cmo',
+  'ta.covariance': '__rt.ta.covariance',
+
   // Math functions -> __rt.math.*
   'math.abs': '__rt.math.abs',
   'math.ceil': '__rt.math.ceil',
@@ -103,6 +117,8 @@ export const BUILTIN_FUNCTIONS: Record<string, string | null> = {
 
   // Math additional
   'math.round_to_mintick': '__rt.math.round_to_mintick',
+  'math.avg': '__rt.math.avg',
+  'math.sum': '__rt.math.sum',
 
   // Strategy -> __rt.strategy.*
   'strategy.entry': '__rt.strategy.entry',
@@ -276,8 +292,10 @@ export const BUILTIN_FUNCTIONS: Record<string, string | null> = {
   'month': '__rt.month',
   'year': '__rt.year',
   'timestamp': '__rt.timestamp',
+  'weekofyear': '__rt.weekofyear',
   'timeframe.in_seconds': '__rt.timeframe.inSeconds',
   'str.format_time': '__rt.str.formatTime',
+  'str.repeat': '__rt.str.repeat',
 
   // Missing array methods
   'array.shift': '__rt.array.shift',
@@ -307,6 +325,45 @@ export const BUILTIN_FUNCTIONS: Record<string, string | null> = {
   'array.percentile_nearest_rank': '__rt.array.percentileNearestRank',
   'array.percentrank': '__rt.array.percentrank',
   'array.standardize': '__rt.array.standardize',
+
+  // Map functions -> __rt.map.*
+  'map.new':      '__rt.map.new',
+  'map.put':      '__rt.map.put',
+  'map.get':      '__rt.map.get',
+  'map.contains': '__rt.map.contains',
+  'map.remove':   '__rt.map.remove',
+  'map.clear':    '__rt.map.clear',
+  'map.keys':     '__rt.map.keys',
+  'map.values':   '__rt.map.values',
+  'map.size':     '__rt.map.size',
+  'map.copy':     '__rt.map.copy',
+
+  // Matrix functions -> __rt.matrix.*
+  'matrix.new':        '__rt.matrix.new',
+  'matrix.get':        '__rt.matrix.get',
+  'matrix.set':        '__rt.matrix.set',
+  'matrix.rows':       '__rt.matrix.rows',
+  'matrix.columns':    '__rt.matrix.columns',
+  'matrix.add_row':    '__rt.matrix.addRow',
+  'matrix.add_col':    '__rt.matrix.addCol',
+  'matrix.remove_row': '__rt.matrix.removeRow',
+  'matrix.remove_col': '__rt.matrix.removeCol',
+  'matrix.copy':       '__rt.matrix.copy',
+  'matrix.fill':       '__rt.matrix.fill',
+  'matrix.sum':        '__rt.matrix.sum',
+  'matrix.avg':        '__rt.matrix.avg',
+  'matrix.max':        '__rt.matrix.max',
+  'matrix.min':        '__rt.matrix.min',
+  'matrix.transpose':  '__rt.matrix.transpose',
+  'matrix.reverse':    '__rt.matrix.reverse',
+  'matrix.sort':       '__rt.matrix.sort',
+  'matrix.reshape':    '__rt.matrix.reshape',
+  'matrix.row':        '__rt.matrix.row',
+  'matrix.col':        '__rt.matrix.col',
+  'matrix.submatrix':  '__rt.matrix.submatrix',
+  'matrix.new_float':  '__rt.matrix.newFloat',
+  'matrix.new_int':    '__rt.matrix.newInt',
+  'matrix.new_bool':   '__rt.matrix.newBool',
 
   // Misc
   'request.security': '__rt.request.security',
