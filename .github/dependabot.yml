@@ -1,0 +1,15 @@
+# Dependency changes remain reviewable pull requests; no automatic merging.
+version: 2
+updates:
+- package-ecosystem: npm
+  directory: /
+  schedule:
+    interval: weekly
+  open-pull-requests-limit: 3
+  groups:
+    compatible-dependencies:
+      patterns:
+      - '*'
+      update-types:
+      - minor
+      - patch
